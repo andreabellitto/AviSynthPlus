@@ -330,6 +330,15 @@ struct AVS_Linkage {
   bool    (VideoInfo::*IsPlanarRGB)() const;
   bool    (VideoInfo::*IsPlanarRGBA)() const;
   /**********************************************************************/
+
+/**********************************************************************/
+  // Reserve pointer space so that we can keep compatibility with AviSynth+
+  void    (VideoInfo::*reserved2[32])();
+/**********************************************************************/
+  // AviSynth+CUDA additions
+  bool    (VideoFrameBuffer::*IsCUDA)() const;
+  int     (VideoFrameBuffer::*GetDeviceIndex)() const;
+  /**********************************************************************/
 };
 
 #ifdef BUILDING_AVSCORE
@@ -747,6 +756,8 @@ enum {
 // to be reused.  The instances are deleted when the corresponding AVS
 // file is closed.
 
+class Device;
+
 class VideoFrameBuffer {
   BYTE* data;
 #ifdef SIZETMOD
@@ -763,12 +774,11 @@ class VideoFrameBuffer {
   friend class ScriptEnvironment;
   volatile long refcount;
 
+  // AVS+CUDA extension, does not break plugins if appended here
+  Device* device;
+
 protected:
-#ifdef SIZETMOD
-  VideoFrameBuffer(size_t size);
-#else
-  VideoFrameBuffer(int size);
-#endif
+  VideoFrameBuffer(int size, Device* device);
   VideoFrameBuffer();
   ~VideoFrameBuffer();
 
@@ -782,6 +792,9 @@ public:
 #endif
   int GetSequenceNumber() const AVS_BakedCode( return AVS_LinkCall(GetSequenceNumber)() )
   int GetRefcount() const AVS_BakedCode( return AVS_LinkCall(GetRefcount)() )
+
+  bool IsCUDA() const AVS_BakedCode(return AVS_LinkCallOptDefault(IsCUDA, false))
+  int GetDeviceIndex() const AVS_BakedCode(return AVS_LinkCallOptDefault(GetDeviceIndex, 0))
 
 // Ensure VideoFrameBuffer cannot be publicly assigned
 private:
@@ -864,6 +877,8 @@ public:
   const BYTE* GetReadPtr(int plane=0) const AVS_BakedCode( return AVS_LinkCall(VFGetReadPtr)(plane) )
   bool IsWritable() const AVS_BakedCode( return AVS_LinkCall(IsWritable)() )
   BYTE* GetWritePtr(int plane=0) const AVS_BakedCode( return AVS_LinkCall(VFGetWritePtr)(plane) )
+
+  bool IsCUDA() const { return vfb->IsCUDA(); }
 
   ~VideoFrame() AVS_BakedCode( AVS_LinkCall_Void(VideoFrame_DESTRUCTOR)() )
 #ifdef BUILDING_AVSCORE
@@ -1346,6 +1361,9 @@ public:
 
   virtual PVideoFrame __stdcall SubframePlanarA(PVideoFrame src, int rel_offset, int new_pitch, int new_row_size,
     int new_height, int rel_offsetU, int rel_offsetV, int new_pitchUV, int rel_offsetA) = 0;
+
+  // CUDA Support
+  virtual int __stdcall SetMemoryMaxCUDA(int mem, int device_index = 0) = 0;
 
 }; // end class IScriptEnvironment2
 

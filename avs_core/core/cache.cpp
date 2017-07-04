@@ -35,6 +35,8 @@
 #include "cache.h"
 #include "internal.h"
 #include "LruCache.h"
+#include "InternalEnvironment.h"
+#include "DeviceManager.h"
 #include <cassert>
 #include <cstdio>
 
@@ -44,11 +46,10 @@
 
 
 extern const AVSFunction Cache_filters[] = {
-  { "Cache", BUILTIN_FUNC_PREFIX, "c", Cache::Create },
-  { "InternalCache", BUILTIN_FUNC_PREFIX, "c", Cache::Create },
+  { "Cache", BUILTIN_FUNC_PREFIX, "c", CacheGuard::Create },
+  { "InternalCache", BUILTIN_FUNC_PREFIX, "c", CacheGuard::Create },
   { 0 }
 };
-
 
 struct CachePimpl
 {
@@ -84,9 +85,10 @@ struct CachePimpl
 };
 
 
-Cache::Cache(const PClip& _child, IScriptEnvironment* env) :
+Cache::Cache(const PClip& _child, Device* device, IScriptEnvironment* env) :
   Env(env),
-  _pimpl(NULL)
+  _pimpl(NULL),
+  device(device)
 {
   _pimpl = new CachePimpl(_child);
   env->ManageCache(MC_RegisterCache, reinterpret_cast<void*>(this));
@@ -136,6 +138,13 @@ PVideoFrame __stdcall Cache::GetFrame(int n, IScriptEnvironment* env)
       {
         //cache_handle.first->value = _pimpl->child->GetFrame(n, env);
         result = _pimpl->child->GetFrame(n, env); // P.F. fill result immediately
+
+        // check device
+        if (result->GetFrameBuffer()->device != device) {
+            env->ThrowError("Frame device mismatch: Assumed: %s Actual: %s", 
+                device->GetName(), result->GetFrameBuffer()->device->GetName());
+        }
+
         cache_handle.first->value = result; // not after commit!
   #ifdef X86_32
         _mm_empty();
@@ -304,41 +313,6 @@ int __stdcall Cache::SetCacheHints(int cachehints, int frame_range)
       return MT_NICE_FILTER;
 
     /*********************************************
-        AVS 2.5 TRANSLATION
-    *********************************************/
-
-    // Ignore 2.5 CACHE_NOTHING requests
-    case CACHE_25_NOTHING:
-      break;
-
-    // Map 2.5 CACHE_RANGE calls to CACHE_WINDOW
-    // force minimum range to 2
-    case CACHE_25_RANGE:
-      if (frame_range < 2) frame_range = 2;
-      SetCacheHints(CACHE_WINDOW, frame_range);
-      break;
-
-    // Map 2.5 CACHE_ALL calls to CACHE_GENERIC
-    case CACHE_25_ALL:
-      SetCacheHints(CACHE_GENERIC, frame_range);
-      break;
-
-    // Map 2.5 CACHE_AUDIO calls to CACHE_AUDIO
-    case CACHE_25_AUDIO:
-      SetCacheHints(CACHE_AUDIO, frame_range);
-      break;
-
-    // Map 2.5 CACHE_AUDIO_NONE calls to CACHE_AUDIO_NONE
-    case CACHE_25_AUDIO_NONE:
-      SetCacheHints(CACHE_AUDIO_NONE, 0);
-      break;
-
-    // Map 2.5 CACHE_AUDIO_AUTO calls to CACHE_AUDIO_AUTO
-    case CACHE_25_AUDIO_AUTO:
-      SetCacheHints(CACHE_AUDIO_AUTO, frame_range);
-      break;
-
-    /*********************************************
         VIDEO
     *********************************************/
 
@@ -459,7 +433,207 @@ int __stdcall Cache::SetCacheHints(int cachehints, int frame_range)
   return 0;
 }
 
-AVSValue __cdecl Cache::Create(AVSValue args, void*, IScriptEnvironment* env)
+CacheGuard::CacheGuard(const PClip& child, IScriptEnvironment* env) :
+    child(child),
+    vi(child->GetVideoInfo())
+{ }
+
+CacheGuard::~CacheGuard()
+{ }
+
+PClip CacheGuard::GetCache(IScriptEnvironment* env_)
+{
+    std::unique_lock<std::mutex> global_lock(mutex);
+    
+	InternalEnvironment* env = static_cast<InternalEnvironment*>(env_);
+
+    Device* device = env->GetCurrentDevice();
+
+    for (auto entry : deviceCaches) {
+        if (entry.first == device) {
+            return entry.second;
+        }
+    }
+
+    // not found for current device, create it
+	Cache* cache = new Cache(child, device, env->GetCoreEnvironment());
+
+	// apply cache hints if it is changed
+    if(hints.min != 0)
+    	cache->SetCacheHints(CACHE_SET_MIN_CAPACITY, (int)hints.min);
+    if(hints.max != std::numeric_limits<size_t>::max())
+    	cache->SetCacheHints(CACHE_SET_MAX_CAPACITY, (int)hints.max);
+
+	deviceCaches.emplace_back(device, cache);
+    return deviceCaches.back().second;
+}
+
+void CacheGuard::ApplyHints(int cachehints, int frame_range)
+{
+	std::unique_lock<std::mutex> global_lock(mutex);
+	for (auto entry : deviceCaches) {
+		entry.second->SetCacheHints(cachehints, frame_range);
+	}
+}
+
+int CacheGuard::GetOrDefault(int cachehints, int frame_range, int def)
+{
+	std::unique_lock<std::mutex> global_lock(mutex);
+	for (auto entry : deviceCaches) {
+		return entry.second->SetCacheHints(cachehints, frame_range);
+	}
+	return def;
+}
+
+PVideoFrame __stdcall CacheGuard::GetFrame(int n, IScriptEnvironment* env)
+{
+    return GetCache(env)->GetFrame(n, env);
+}
+
+void __stdcall CacheGuard::GetAudio(void* buf, __int64 start, __int64 count, IScriptEnvironment* env)
+{
+    return GetCache(env)->GetAudio(buf, start, count, env);
+}
+
+const VideoInfo& __stdcall CacheGuard::GetVideoInfo()
+{
+    return vi;
+}
+
+bool __stdcall CacheGuard::GetParity(int n)
+{
+    return child->GetParity(n);
+}
+
+int __stdcall CacheGuard::SetCacheHints(int cachehints, int frame_range)
+{
+	_RPT3(0, "CacheGuard::SetCacheHints called. cache=%p hint=%d frame_range=%d\n", (void *)this, cachehints, frame_range); // P.F.
+	switch (cachehints)
+	{
+		/*********************************************
+		MISC
+		*********************************************/
+
+		// By returning IS_CACHE_ANS to IS_CACHE_REQ, we tell the caller we are a cache
+	case CACHE_IS_CACHE_REQ:
+		return CACHE_IS_CACHE_ANS;
+
+	case CACHE_GET_POLICY: // Get the current policy.
+		return CACHE_GENERIC;
+
+	case CACHE_DONT_CACHE_ME:
+		return 1;
+
+	case CACHE_GET_MTMODE:
+		return MT_NICE_FILTER;
+
+		/*********************************************
+		AVS 2.5 TRANSLATION
+		*********************************************/
+
+		// Ignore 2.5 CACHE_NOTHING requests
+	case CACHE_25_NOTHING:
+		break;
+
+		// Map 2.5 CACHE_RANGE calls to CACHE_WINDOW
+		// force minimum range to 2
+	case CACHE_25_RANGE:
+		if (frame_range < 2) frame_range = 2;
+		SetCacheHints(CACHE_WINDOW, frame_range);
+		break;
+
+		// Map 2.5 CACHE_ALL calls to CACHE_GENERIC
+	case CACHE_25_ALL:
+		SetCacheHints(CACHE_GENERIC, frame_range);
+		break;
+
+		// Map 2.5 CACHE_AUDIO calls to CACHE_AUDIO
+	case CACHE_25_AUDIO:
+		SetCacheHints(CACHE_AUDIO, frame_range);
+		break;
+
+		// Map 2.5 CACHE_AUDIO_NONE calls to CACHE_AUDIO_NONE
+	case CACHE_25_AUDIO_NONE:
+		SetCacheHints(CACHE_AUDIO_NONE, 0);
+		break;
+
+		// Map 2.5 CACHE_AUDIO_AUTO calls to CACHE_AUDIO_AUTO
+	case CACHE_25_AUDIO_AUTO:
+		SetCacheHints(CACHE_AUDIO_AUTO, frame_range);
+		break;
+
+		/*********************************************
+		VIDEO
+		*********************************************/
+
+	case CACHE_SET_MIN_CAPACITY:
+		hints.min = frame_range;
+		ApplyHints(cachehints, frame_range);
+		break;
+
+	case CACHE_SET_MAX_CAPACITY:
+		hints.max = frame_range;
+		ApplyHints(cachehints, frame_range);
+		break;
+
+	case CACHE_GET_MIN_CAPACITY:
+		return hints.min;
+
+	case CACHE_GET_MAX_CAPACITY:
+		return hints.max;
+
+	case CACHE_GET_SIZE:
+	case CACHE_GET_REQUESTED_CAP:
+	case CACHE_GET_CAPACITY:
+		return GetOrDefault(cachehints, frame_range, 0);
+
+	case CACHE_GET_WINDOW: // Get the current window h_span.
+	case CACHE_GET_RANGE: // Get the current generic frame range.
+		return 2;
+		break;
+
+	case CACHE_GENERIC:
+	case CACHE_FORCE_GENERIC:
+	case CACHE_NOTHING:
+	case CACHE_WINDOW:
+	case CACHE_PREFETCH_FRAME:          // Queue request to prefetch frame N.
+	case CACHE_PREFETCH_GO:             // Action video prefetches.
+		break;
+
+		/*********************************************
+		TODO AUDIO
+		*********************************************/
+
+	case CACHE_AUDIO:
+	case CACHE_AUDIO_AUTO:
+	case CACHE_AUDIO_NONE:
+	case CACHE_AUDIO_NOTHING:
+		hints.AudioPolicy = (CachePolicyHint)cachehints;
+		ApplyHints(cachehints, frame_range);
+		break;
+
+	case CACHE_GET_AUDIO_POLICY: // Get the current audio policy.
+		return hints.AudioPolicy;
+
+	case CACHE_GET_AUDIO_SIZE: // Get the current audio cache size.
+		return GetOrDefault(cachehints, frame_range, 0);
+
+	case CACHE_PREFETCH_AUDIO_BEGIN:    // Begin queue request to prefetch audio (take critical section).
+	case CACHE_PREFETCH_AUDIO_STARTLO:  // Set low 32 bits of start.
+	case CACHE_PREFETCH_AUDIO_STARTHI:  // Set high 32 bits of start.
+	case CACHE_PREFETCH_AUDIO_COUNT:    // Set low 32 bits of length.
+	case CACHE_PREFETCH_AUDIO_COMMIT:   // Enqueue request transaction to prefetch audio (release critical section).
+	case CACHE_PREFETCH_AUDIO_GO:       // Action audio prefetch
+		break;
+
+	default:
+		return 0;
+	}
+
+	return 0;
+}
+
+AVSValue __cdecl CacheGuard::Create(AVSValue args, void*, IScriptEnvironment* env)
 {
   PClip p = 0;
   if (args.IsClip())
@@ -481,7 +655,7 @@ AVSValue __cdecl Cache::Create(AVSValue args, void*, IScriptEnvironment* env)
     }
     else
     {
-      return new Cache(p, env);
+      return new CacheGuard(p, env);
     }
   }
   else
@@ -490,7 +664,7 @@ AVSValue __cdecl Cache::Create(AVSValue args, void*, IScriptEnvironment* env)
   }
 }
 
-bool __stdcall Cache::IsCache(const PClip& p)
+bool __stdcall CacheGuard::IsCache(const PClip& p)
 {
   return ((p->GetVersion() >= 5) && (p->SetCacheHints(CACHE_IS_CACHE_REQ, 0) == CACHE_IS_CACHE_ANS));
 }

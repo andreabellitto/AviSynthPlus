@@ -205,7 +205,7 @@ PVideoFrame __stdcall Prefetcher::GetFrame(int n, IScriptEnvironment* env)
 {
   InternalEnvironment *envI = static_cast<InternalEnvironment*>(env);
   ScriptEnvironmentTLS *envTLS = &_pimpl->EnvTlsMainThread;
-  envTLS->Specialize(envI);
+  envTLS->Specialize(envI, envI->GetCurrentDevice());
 
 
   int pattern = n - _pimpl->LastRequestedFrame;

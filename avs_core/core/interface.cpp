@@ -49,7 +49,7 @@
 
 #include <avisynth.h>
 #include <avs/win.h>
-
+#include "DeviceManager.h"
 
 /**********************************************************************/
 
@@ -410,6 +410,9 @@ int VideoFrameBuffer::GetDataSize() const { return data_size; }
 #endif
 int VideoFrameBuffer::GetSequenceNumber() const { return sequence_number; }
 int VideoFrameBuffer::GetRefcount() const { return refcount; }
+
+bool VideoFrameBuffer::IsCUDA() const { return device->device_type == DEV_TYPE_CUDA; }
+int VideoFrameBuffer::GetDeviceIndex() const { return device->device_index; }
 
 // end class VideoFrameBuffer
 
@@ -1061,6 +1064,43 @@ static const AVS_Linkage avs_linkage = {    // struct AVS_Linkage {
   &VideoInfo::IsYUVA,                       //   bool    (VideoInfo::*IsYUVA)()  const;
   &VideoInfo::IsPlanarRGB,                  //   bool    (VideoInfo::*IsPlanarRGB)()  const;
   &VideoInfo::IsPlanarRGBA,                 //   bool    (VideoInfo::*IsPlanarRGBA)()  const;
+/**********************************************************************/
+  NULL,                                     //   reserved for AviSynth+
+  NULL,                                     //   reserved for AviSynth+
+  NULL,                                     //   reserved for AviSynth+
+  NULL,                                     //   reserved for AviSynth+
+  NULL,                                     //   reserved for AviSynth+
+  NULL,                                     //   reserved for AviSynth+
+  NULL,                                     //   reserved for AviSynth+
+  NULL,                                     //   reserved for AviSynth+
+  NULL,                                     //   reserved for AviSynth+
+  NULL,                                     //   reserved for AviSynth+
+  NULL,                                     //   reserved for AviSynth+
+  NULL,                                     //   reserved for AviSynth+
+  NULL,                                     //   reserved for AviSynth+
+  NULL,                                     //   reserved for AviSynth+
+  NULL,                                     //   reserved for AviSynth+
+  NULL,                                     //   reserved for AviSynth+
+  NULL,                                     //   reserved for AviSynth+
+  NULL,                                     //   reserved for AviSynth+
+  NULL,                                     //   reserved for AviSynth+
+  NULL,                                     //   reserved for AviSynth+
+  NULL,                                     //   reserved for AviSynth+
+  NULL,                                     //   reserved for AviSynth+
+  NULL,                                     //   reserved for AviSynth+
+  NULL,                                     //   reserved for AviSynth+
+  NULL,                                     //   reserved for AviSynth+
+  NULL,                                     //   reserved for AviSynth+
+  NULL,                                     //   reserved for AviSynth+
+  NULL,                                     //   reserved for AviSynth+
+  NULL,                                     //   reserved for AviSynth+
+  NULL,                                     //   reserved for AviSynth+
+  NULL,                                     //   reserved for AviSynth+
+  NULL,                                     //   reserved for AviSynth+
+/**********************************************************************/
+  // AviSynth+CUDA additions
+  &VideoFrameBuffer::IsCUDA,                //   bool    (VideoFrameBuffer::*IsCUDA)() const;
+  &VideoFrameBuffer::GetDeviceIndex,        //   int     (VideoFrameBuffer::*GetDeviceIndex)() const;
 // this part should be identical with struct AVS_Linkage in avisynth.h
 
 /**********************************************************************/
