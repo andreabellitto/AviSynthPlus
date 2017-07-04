@@ -8,6 +8,11 @@
 #include "BufferPool.h"
 #include "InternalEnvironment.h"
 
+extern __declspec(thread) size_t g_thread_id;
+
+#define CHECK_THREAD if(g_thread_id != thread_id) \
+	core->ThrowError("Invalid ScriptEnvironment. You are using different thread's environment.")
+
 class ScriptEnvironmentTLS : public InternalEnvironment
 {
 private:
@@ -18,6 +23,7 @@ private:
   // comment remains here until it gets cleared, anyway, I make it of no use
   VarTable* var_table;
   BufferPool BufferPool;
+  Device* currentDevice;
 
 public:
   ScriptEnvironmentTLS(size_t _thread_id) :
@@ -25,7 +31,8 @@ public:
     thread_id(_thread_id),
     global_var_table(NULL),
     var_table(NULL),
-    BufferPool(this)
+    BufferPool(this),
+	currentDevice(NULL)
   {
     global_var_table = new VarTable(0, 0);
     var_table = new VarTable(0, global_var_table);
@@ -40,9 +47,10 @@ public:
       PopContextGlobal();
   }
 
-  void Specialize(InternalEnvironment* _core)
+  void Specialize(InternalEnvironment* _core, Device* _device)
   {
-    core = _core;
+    core = _core->GetCoreEnvironment();
+	currentDevice = _device;
   }
 
   /* ---------------------------------------------------------------------------------
@@ -152,6 +160,25 @@ public:
     BufferPool.Free(ptr);
   }
 
+  virtual Device* __stdcall GetCurrentDevice()
+  {
+	  CHECK_THREAD;
+	  return currentDevice;
+  }
+
+  virtual Device* __stdcall SetCurrentDevice(Device* device)
+  {
+	  CHECK_THREAD;
+	  Device* old = currentDevice;
+	  currentDevice = device;
+	  return old;
+  }
+
+  PVideoFrame __stdcall NewVideoFrame(const VideoInfo& vi, int align)
+  {
+	  return core->NewVideoFrame(vi, align, currentDevice);
+  }
+
 
   /* ---------------------------------------------------------------------------------
    *             S T U B S
@@ -228,11 +255,6 @@ public:
   AVSValue __stdcall Invoke(const char* name, const AVSValue args, const char* const* arg_names=0)
   {
     return core->Invoke(name, args, arg_names);
-  }
-
-  PVideoFrame __stdcall NewVideoFrame(const VideoInfo& vi, int align)
-  {
-    return core->NewVideoFrame(vi, align);
   }
 
   bool __stdcall MakeWritable(PVideoFrame* pvf)
@@ -417,7 +439,32 @@ public:
     core->LogMsgOnce_valist(ticket, level, fmt, va);
   }
 
+  virtual InternalEnvironment* __stdcall GetCoreEnvironment()
+  {
+	  return core->GetCoreEnvironment();
+  }
+
+  virtual int __stdcall SetMemoryMaxCUDA(int mem, int device_index = 0)
+  {
+      return core->SetMemoryMaxCUDA(mem, device_index);
+  }
+
+  virtual Device* __stdcall GetDevice(int device_type, int device_index)
+  {
+	  return core->GetDevice(device_type, device_index);
+  }
+
+  PVideoFrame __stdcall NewVideoFrame(const VideoInfo& vi, int align, Device* device)
+  {
+	  return core->NewVideoFrame(vi, align, device);
+  }
+
+  virtual PVideoFrame __stdcall GetOnDeviceFrame(const PVideoFrame& src,  Device* device)
+  {
+	  return core->GetOnDeviceFrame(src, device);
+  }
 };
 
+#undef CHECK_THREAD
 
 #endif  // _SCRIPTENVIRONMENTTLS_H

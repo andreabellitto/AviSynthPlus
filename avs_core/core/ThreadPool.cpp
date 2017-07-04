@@ -9,6 +9,7 @@ struct ThreadPoolGenericItemData
   void* Params;
   InternalEnvironment* Environment;
   AVSPromise* Promise;
+  Device* Device;
 };
 
 enum ThreadMessagesType{
@@ -36,9 +37,12 @@ struct ThreadMessage
 #include "mpmc_bounded_queue.h"
 typedef mpmc_bounded_queue<ThreadMessage> MessageQueue;
 
+__declspec(thread) size_t g_thread_id = 0;
+
 static void ThreadFunc(size_t thread_id, MessageQueue *msgQueue)
 {
   ScriptEnvironmentTLS EnvTLS(thread_id);
+  g_thread_id = thread_id;
 
   bool runThread = true;
   while(runThread)
@@ -56,7 +60,7 @@ static void ThreadFunc(size_t thread_id, MessageQueue *msgQueue)
     case QUEUE_GENERIC_ITEM:
       {
         ThreadPoolGenericItemData &data = msg.GenericWorkItemData;
-        EnvTLS.Specialize(data.Environment);
+        EnvTLS.Specialize(data.Environment, data.Device);
         if (data.Promise != NULL)
         {
           try
@@ -123,6 +127,7 @@ void ThreadPool::QueueJob(ThreadWorkerFuncPtr clb, void* params, InternalEnviron
   itemData.Func = clb;
   itemData.Params = params;
   itemData.Environment = env;
+  itemData.Device = env->GetCurrentDevice();
 
   if (tc != NULL)
     itemData.Promise = tc->Add();

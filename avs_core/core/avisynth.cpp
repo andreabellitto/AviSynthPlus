@@ -60,6 +60,8 @@
 #include "cache.h"
 #include <clocale>
 
+#include "DeviceManager.h"
+
 #ifndef YieldProcessor // low power spin idle
   #define YieldProcessor() __nop(void)
 #endif
@@ -74,7 +76,7 @@ extern const AVSFunction Audio_filters[], Combine_filters[], Convert_filters[],
                    Debug_filters[], Turn_filters[],
                    Conditional_filters[], Conditional_funtions_filters[],
                    Cache_filters[], Greyscale_filters[],
-                   Swap_filters[], Overlay_filters[];
+                   Swap_filters[], Overlay_filters[], Device_filters[];
 
 
 const AVSFunction* const builtin_functions[] = {
@@ -88,7 +90,8 @@ const AVSFunction* const builtin_functions[] = {
                    Debug_filters, Turn_filters,
                    Conditional_filters, Conditional_funtions_filters,
                    Plugin_functions, Cache_filters,
-                   Overlay_filters, Greyscale_filters, Swap_filters};
+                   Overlay_filters, Greyscale_filters, Swap_filters,
+				   Device_filters };
 
 // Global statistics counters
 struct {
@@ -352,44 +355,22 @@ VideoFrame* VideoFrame::Subframe(int rel_offset, int new_pitch, int new_row_size
 VideoFrameBuffer::VideoFrameBuffer() : refcount(1), data(NULL), data_size(0), sequence_number(0) {}
 
 
-VideoFrameBuffer::VideoFrameBuffer(int size) :
-#ifdef _DEBUG
-  data(new BYTE[size+16]),
-#else
-  data(new BYTE[size]),
-#endif
+VideoFrameBuffer::VideoFrameBuffer(int size, Device* device) :
+  data(device->Allocate(size)),
   data_size(size),
   sequence_number(0),
-  refcount(0)
+  refcount(0),
+  device(device)
   {
-
-#ifdef _DEBUG
-  int *pInt=(int *)(data+size);
-  pInt[0] = 0xDEADBEEF;
-  pInt[1] = 0xDEADBEEF;
-  pInt[2] = 0xDEADBEEF;
-  pInt[3] = 0xDEADBEEF;
-
-  static const BYTE filler[] = { 0x0A, 0x11, 0x0C, 0xA7, 0xED };
-  BYTE* pByte = data;
-  BYTE* q = pByte + data_size/5*5;
-  for (; pByte<q; pByte+=5)
-  {
-    pByte[0]=filler[0];
-    pByte[1]=filler[1];
-    pByte[2]=filler[2];
-    pByte[3]=filler[3];
-    pByte[4]=filler[4];
-  }
-#endif
 }
 
 VideoFrameBuffer::~VideoFrameBuffer() {
 //  _ASSERTE(refcount == 0);
   InterlockedIncrement(&sequence_number); // HACK : Notify any children with a pointer, this buffer has changed!!!
-  if (data) delete[] data;
+  if (data) device->Free(data);
   data = nullptr; // and mark it invalid!!
   data_size = 0;   // and don't forget to set the size to 0 as well!
+  device = nullptr; // no longer related to a device
 }
 
 
@@ -671,8 +652,9 @@ public:
   void __stdcall PopContext();
   void __stdcall PopContextGlobal();
   PVideoFrame __stdcall NewVideoFrame(const VideoInfo& vi, int align);
-  PVideoFrame NewVideoFrame(int row_size, int height, int align);
-  PVideoFrame NewPlanarVideoFrame(int row_size, int height, int row_sizeUV, int heightUV, int align, bool U_first);
+  PVideoFrame __stdcall NewVideoFrame(const VideoInfo& vi, int align, Device* device);
+  PVideoFrame NewVideoFrame(int row_size, int height, int align, Device* device);
+  PVideoFrame NewPlanarVideoFrame(int row_size, int height, int row_sizeUV, int heightUV, int align, bool U_first, Device* device);
   bool __stdcall MakeWritable(PVideoFrame* pvf);
   void __stdcall BitBlt(BYTE* dstp, int dst_pitch, const BYTE* srcp, int src_pitch, int row_size, int height);
   void __stdcall AtExit(IScriptEnvironment::ShutdownFunc function, void* user_data);
@@ -689,7 +671,7 @@ public:
   AVSValue __stdcall GetVarDef(const char* name, const AVSValue& def = AVSValue());
 
   // alpha support
-  PVideoFrame NewPlanarVideoFrame(int row_size, int height, int row_sizeUV, int heightUV, int align, bool U_first, bool alpha);
+  PVideoFrame NewPlanarVideoFrame(int row_size, int height, int row_sizeUV, int heightUV, int align, bool U_first, bool alpha, Device* device);
   PVideoFrame __stdcall SubframePlanar(PVideoFrame src, int rel_offset, int new_pitch, int new_row_size, int new_height, int rel_offsetU, int rel_offsetV, int new_pitchUV, int rel_offsetA);
 
   /* IScriptEnvironment2 */
@@ -728,6 +710,13 @@ public:
   virtual void __stdcall VThrowError(const char* fmt, va_list va);
   virtual PVideoFrame __stdcall SubframePlanarA(PVideoFrame src, int rel_offset, int new_pitch, int new_row_size, int new_height, int rel_offsetU, int rel_offsetV, int new_pitchUV, int rel_offsetA);
 
+  virtual InternalEnvironment* __stdcall GetCoreEnvironment();
+  virtual int __stdcall SetMemoryMaxCUDA(int mem, int device_index);
+  virtual Device* __stdcall GetDevice(int device_type, int device_index);
+  virtual Device* __stdcall GetCurrentDevice();
+  virtual Device* __stdcall SetCurrentDevice(Device* device);
+  virtual PVideoFrame __stdcall GetOnDeviceFrame(const PVideoFrame& src, Device* device);
+
 private:
 
   // Tritical May 2005
@@ -747,13 +736,13 @@ private:
   VarTable* global_var_table;
   VarTable* var_table;
 
+  Device* currentDevice;
+
   int ImportDepth;
 
   const AVSFunction* Lookup(const char* search_name, const AVSValue* args, size_t num_args,
                       bool &pstrict, size_t args_names_count, const char* const* arg_names);
-  void EnsureMemoryLimit(size_t request);
-  unsigned __int64 memory_max;
-  std::atomic<unsigned __int64> memory_used;
+  void EnsureMemoryLimit(size_t request, Device* device);
   std::unordered_map<IClip*, ClipDataStore> clip_data;
 
   void ExportBuiltinFilters();
@@ -791,10 +780,11 @@ private:
   void ListFrameRegistry(size_t min_size, size_t max_size, bool someframes);
 #endif
 
+  DeviceManager DeviceManager;
   CacheRegistryType CacheRegistry;
   Cache* FrontCache;
-  VideoFrame* GetNewFrame(size_t vfb_size);
-  VideoFrame* AllocateFrame(size_t vfb_size);
+  VideoFrame* GetNewFrame(size_t vfb_size, Device* device);
+  VideoFrame* AllocateFrame(size_t vfb_size, Device* device);
   std::recursive_mutex memory_mutex;
 
   BufferPool BufferPool;
@@ -867,6 +857,7 @@ ScriptEnvironment::ScriptEnvironment()
     closing(false),
     thread_pool(NULL),
     ImportDepth(0),
+    DeviceManager(this),
     FrontCache(NULL),
     prefetcher(NULL),
     BufferPool(this)
@@ -884,13 +875,16 @@ ScriptEnvironment::ScriptEnvironment()
     // Remember our threadId.
     coinitThreadId=GetCurrentThreadId();
 
+    auto cpuDevice = DeviceManager.GetCPUDevice();
+	currentDevice = cpuDevice;
+
     MEMORYSTATUSEX memstatus;
     memstatus.dwLength = sizeof(memstatus);
     GlobalMemoryStatusEx(&memstatus);
-    memory_max = ConstrainMemoryRequest(memstatus.ullTotalPhys / 4);
+    cpuDevice->memory_max = ConstrainMemoryRequest(memstatus.ullTotalPhys / 4);
     const bool isX64 = sizeof(void *) == 8;
-    memory_max = min(memory_max, (isX64 ? 4096 : 1024)*(1024*1024ull));  // at start, cap memory usage to 1GB(x86)/4GB (x64)
-    memory_used = 0ull;
+    cpuDevice->memory_max = min(cpuDevice->memory_max, (isX64 ? 4096 : 1024)*(1024*1024ull));  // at start, cap memory usage to 1GB(x86)/4GB (x64)
+    cpuDevice->memory_used = 0ull;
 
     global_var_table = new VarTable(0, 0);
     var_table = new VarTable(0, global_var_table);
@@ -1193,9 +1187,9 @@ void __stdcall ScriptEnvironment::SetPrefetcher(Prefetcher *p)
 void __stdcall ScriptEnvironment::AdjustMemoryConsumption(size_t amount, bool minus)
 {
   if (minus)
-    memory_used -= amount;
+    DeviceManager.GetCPUDevice()->memory_used -= amount;
   else
-    memory_used += amount;
+    DeviceManager.GetCPUDevice()->memory_used += amount;
 }
 
 void __stdcall ScriptEnvironment::ParallelJob(ThreadWorkerFuncPtr jobFunc, void* jobData, IJobCompletion* completion)
@@ -1386,10 +1380,11 @@ void __stdcall ScriptEnvironment::AutoloadPlugins()
 
 int ScriptEnvironment::SetMemoryMax(int mem) {
 
+  Device* cpuDevice = DeviceManager.GetCPUDevice();
   if (mem > 0)  /* If mem is zero, we should just return current setting */
-    memory_max = ConstrainMemoryRequest(mem * 1048576ull);
+      cpuDevice->memory_max = ConstrainMemoryRequest(mem * 1048576ull);
 
-  return (int)(memory_max/1048576ull);
+  return (int)(cpuDevice->memory_max/1048576ull);
 }
 
 int ScriptEnvironment::SetWorkingDir(const char * newdir) {
@@ -1490,19 +1485,19 @@ bool ScriptEnvironment::SetGlobalVar(const char* name, const AVSValue& val) {
   return global_var_table->Set(name, val);
 }
 
-VideoFrame* ScriptEnvironment::AllocateFrame(size_t vfb_size)
+VideoFrame* ScriptEnvironment::AllocateFrame(size_t vfb_size, Device* device)
 {
   if (vfb_size > (size_t)std::numeric_limits<int>::max())
   {
     throw AvisynthError(this->Sprintf("Requested buffer size of %zu is too large", vfb_size));
   }
 
-  EnsureMemoryLimit(vfb_size);
+  EnsureMemoryLimit(vfb_size, device);
 
   VideoFrameBuffer* vfb = NULL;
   try
   {
-    vfb = new VideoFrameBuffer((int)vfb_size);
+    vfb = new VideoFrameBuffer((int)vfb_size, device);
   }
   catch(const std::bad_alloc&)
   {
@@ -1520,7 +1515,7 @@ VideoFrame* ScriptEnvironment::AllocateFrame(size_t vfb_size)
     return NULL;
   }
 
-  memory_used+=vfb_size;
+  device->memory_used+=vfb_size;
 
   // automatically inserts keys if they not exist!
   // no locking here, calling method have done it already
@@ -1617,7 +1612,7 @@ void ScriptEnvironment::ListFrameRegistry(size_t min_size, size_t max_size, bool
 #endif
 
 
-VideoFrame* ScriptEnvironment::GetNewFrame(size_t vfb_size)
+VideoFrame* ScriptEnvironment::GetNewFrame(size_t vfb_size, Device* device)
 {
   std::unique_lock<std::recursive_mutex> env_lock(memory_mutex);
 #ifdef DEBUG_GSCRIPTCLIP_MT
@@ -1665,7 +1660,7 @@ VideoFrame* ScriptEnvironment::GetNewFrame(size_t vfb_size)
       ++it2)
     {
       VideoFrameBuffer *vfb = it2->first; // same for all map content, the key is vfb pointer
-      if (0 == vfb->refcount) // vfb refcount check
+      if (device == vfb->device && 0 == vfb->refcount) // vfb device and refcount check
       {
         size_t videoFrameListSize = it2->second.size();
         VideoFrame *frame_found;
@@ -1725,7 +1720,7 @@ VideoFrame* ScriptEnvironment::GetNewFrame(size_t vfb_size)
       }
     } // for it2
   } // for it
-  _RPT3(0, "ScriptEnvironment::GetNewFrame, no free entry in FrameRegistry. Requested vfb size=%Iu memused=%I64d memmax=%I64d\n", vfb_size, memory_used.load(), memory_max);
+  _RPT3(0, "ScriptEnvironment::GetNewFrame, no free entry in FrameRegistry. Requested vfb size=%Iu memused=%I64d memmax=%I64d\n", vfb_size, device->memory_used.load(), device->memory_max);
 
 #ifdef _DEBUG
   //ListFrameRegistry(vfb_size, vfb_size, true); // for chasing stuck frames
@@ -1736,7 +1731,7 @@ VideoFrame* ScriptEnvironment::GetNewFrame(size_t vfb_size)
    *   No unused instance was found, try to allocate a new one
    * -----------------------------------------------------------
    */
-  VideoFrame* frame = AllocateFrame(vfb_size);
+  VideoFrame* frame = AllocateFrame(vfb_size, device);
   if ( frame != NULL)
     return frame;
 
@@ -1745,7 +1740,7 @@ VideoFrame* ScriptEnvironment::GetNewFrame(size_t vfb_size)
    * Couldn't allocate, try to free up unused frames of any size
    * -----------------------------------------------------------
    */
-  _RPT1(0, "Allocate failed. GC start memory_used=%I64d\n", memory_used.load());
+  _RPT1(0, "Allocate failed. GC start memory_used=%I64d\n", device->memory_used.load());
   // unfortunately if we reach here, only 0 or 1 vfbs or frames can be freed, from lower vfb sizes
   // usually it's not enough
   // yet it is true that it's meaningful only to free up smaller vfb sizes here
@@ -1758,9 +1753,9 @@ VideoFrame* ScriptEnvironment::GetNewFrame(size_t vfb_size)
       /*++it2: not here: may delete iterator position */)
     {
       VideoFrameBuffer *vfb = it2->first;
-      if (0 == vfb->refcount) // vfb refcount check
+      if (device == vfb->device && 0 == vfb->refcount) // vfb refcount check
       {
-        memory_used -= vfb->GetDataSize(); // frame->vfb->GetDataSize();
+        vfb->device->memory_used -= vfb->GetDataSize(); // frame->vfb->GetDataSize();
         delete vfb;
         const VideoFrameArrayType::iterator end_it3 = it2->second.end(); // const
         for (VideoFrameArrayType::iterator it3 = it2->second.begin();
@@ -1778,13 +1773,13 @@ VideoFrame* ScriptEnvironment::GetNewFrame(size_t vfb_size)
       else ++it2;
     }
   }
-  _RPT1(0, "End of garbage collection A memused=%I64d\n", memory_used.load()); // P.F.
+  _RPT1(0, "End of garbage collection A memused=%I64d\n", device->memory_used.load()); // P.F.
 
   /* -----------------------------------------------------------
    *   Try to allocate again
    * -----------------------------------------------------------
    */
-  frame = AllocateFrame(vfb_size);
+  frame = AllocateFrame(vfb_size, device);
   if ( frame != NULL)
     return frame;
 
@@ -1795,7 +1790,7 @@ VideoFrame* ScriptEnvironment::GetNewFrame(size_t vfb_size)
    */
 
   // See if we could benefit from 64-bit Avisynth
-  if (sizeof(void*) == 4)
+  if (sizeof(void*) == 4 && device == DeviceManager.GetCPUDevice())
   {
       // Get system memory information
       MEMORYSTATUSEX memstatus;
@@ -1811,11 +1806,11 @@ VideoFrame* ScriptEnvironment::GetNewFrame(size_t vfb_size)
       }
   }
 
-  ThrowError("Could not allocate video frame. Out of memory. memory_max = %I64d, memory_used = %I64d Request=%Iu", memory_max, memory_used.load(), vfb_size);
+  ThrowError("Could not allocate video frame. Out of memory. memory_max = %I64d, memory_used = %I64d Request=%Iu", device->memory_max, device->memory_used.load(), vfb_size);
   return NULL;
 }
 
-void ScriptEnvironment::EnsureMemoryLimit(size_t request)
+void ScriptEnvironment::EnsureMemoryLimit(size_t request, Device* device)
 {
 
   /* -----------------------------------------------------------
@@ -1824,9 +1819,9 @@ void ScriptEnvironment::EnsureMemoryLimit(size_t request)
    */
 
    // We reserve 15% for unaccounted stuff
-  size_t memory_need = size_t((memory_used + request) / 0.85f);
+  size_t memory_need = size_t((device->memory_used + request) / 0.85f);
 
-  _RPT4(0, "ScriptEnvironment::EnsureMemoryLimit CR_size=%zu memory_need=%zu memory_used=%I64d memory_max=%I64d\n", CacheRegistry.size(), memory_need, memory_used.load(), memory_max);
+  _RPT4(0, "ScriptEnvironment::EnsureMemoryLimit CR_size=%zu memory_need=%zu memory_used=%I64d memory_max=%I64d\n", CacheRegistry.size(), memory_need, device->memory_used.load(), device->memory_max);
 #ifdef _DEBUG
   // #define LIST_CACHES
   // list all cache_entries
@@ -1852,7 +1847,7 @@ void ScriptEnvironment::EnsureMemoryLimit(size_t request)
   const CacheRegistryType::iterator end_cit = CacheRegistry.end();
   for (
     CacheRegistryType::iterator cit = CacheRegistry.begin();
-    (memory_need > memory_max) && (cit != end_cit);
+    (memory_need > device->memory_max) && (cit != end_cit);
     ++cit
     )
   {
@@ -1862,6 +1857,9 @@ void ScriptEnvironment::EnsureMemoryLimit(size_t request)
     // We try to shrink least recently used caches first.
 
     Cache* cache = *cit;
+    if (cache->GetDevice() != device) {
+        continue;
+    }
     int cache_size = cache->SetCacheHints(CACHE_GET_SIZE, 0);
     if (cache_size != 0)
     {
@@ -1884,7 +1882,7 @@ void ScriptEnvironment::EnsureMemoryLimit(size_t request)
   // Free up in one pass in FrameRegistry2
   if (shrinkcount)
   {
-    _RPT1(0, "EnsureMemoryLimit GC start: memused=%I64d\n", memory_used.load());
+    _RPT1(0, "EnsureMemoryLimit GC start: memused=%I64d\n", device->memory_used.load());
     int freed_vfb_count = 0;
     int freed_frame_count = 0;
     int unfreed_frame_count = 0;
@@ -1898,10 +1896,10 @@ void ScriptEnvironment::EnsureMemoryLimit(size_t request)
         /*++it2: not here: may delete iterator position */)
       {
         VideoFrameBuffer *vfb = it2->first;
-        if (0 == vfb->refcount) // vfb refcount check
+        if (device == vfb->device && 0 == vfb->refcount) // vfb device and refcount check
         {
           _RPT2(0, "ScriptEnvironment::EnsureMemoryLimit v2 req=%Iu freed=%d\n", request, vfb->GetDataSize()); // P.F.
-          memory_used -= vfb->GetDataSize();
+          device->memory_used -= vfb->GetDataSize();
           VideoFrameBuffer *_vfb = vfb;
           delete vfb;
           ++freed_vfb_count;
@@ -1930,18 +1928,18 @@ void ScriptEnvironment::EnsureMemoryLimit(size_t request)
         else ++it2;
       }
     }
-    _RPT4(0, "End of garbage collection B: freed_vfb=%d frame=%d unfreed=%d memused=%I64d\n", freed_vfb_count, freed_frame_count, unfreed_frame_count, memory_used.load()); // P.F.
+    _RPT4(0, "End of garbage collection B: freed_vfb=%d frame=%d unfreed=%d memused=%I64d\n", freed_vfb_count, freed_frame_count, unfreed_frame_count, device->memory_used.load()); // P.F.
   }
 }
 
 // no alpha
-PVideoFrame ScriptEnvironment::NewPlanarVideoFrame(int row_size, int height, int row_sizeUV, int heightUV, int align, bool U_first)
+PVideoFrame ScriptEnvironment::NewPlanarVideoFrame(int row_size, int height, int row_sizeUV, int heightUV, int align, bool U_first, Device* device)
 {
-    return NewPlanarVideoFrame(row_size, height, row_sizeUV, heightUV, align, U_first, false); // no alpha
+    return NewPlanarVideoFrame(row_size, height, row_sizeUV, heightUV, align, U_first, false, device); // no alpha
 }
 
 // with alpha support
-PVideoFrame ScriptEnvironment::NewPlanarVideoFrame(int row_size, int height, int row_sizeUV, int heightUV, int align, bool U_first, bool alpha)
+PVideoFrame ScriptEnvironment::NewPlanarVideoFrame(int row_size, int height, int row_sizeUV, int heightUV, int align, bool U_first, bool alpha, Device* device)
 {
   if (align < 0)
   {
@@ -1965,7 +1963,7 @@ PVideoFrame ScriptEnvironment::NewPlanarVideoFrame(int row_size, int height, int
   size_t size = pitchY * height + 2 * pitchUV * heightUV + (alpha ? pitchY * height : 0);
   size = size + align -1;
 
-  VideoFrame *res = GetNewFrame(size);
+  VideoFrame *res = GetNewFrame(size, device);
 
   int  offsetU, offsetV, offsetA;
   const int offsetY = (int)(AlignPointer(res->vfb->GetWritePtr(), align) - res->vfb->GetWritePtr()); // first line offset for proper alignment
@@ -1998,7 +1996,7 @@ PVideoFrame ScriptEnvironment::NewPlanarVideoFrame(int row_size, int height, int
 }
 
 
-PVideoFrame ScriptEnvironment::NewVideoFrame(int row_size, int height, int align)
+PVideoFrame ScriptEnvironment::NewVideoFrame(int row_size, int height, int align, Device* device)
 {
   if (align < 0)
   {
@@ -2012,7 +2010,7 @@ PVideoFrame ScriptEnvironment::NewVideoFrame(int row_size, int height, int align
   size_t size = pitch * height;
   size = size + align - 1;
 
-  VideoFrame *res = GetNewFrame(size);
+  VideoFrame *res = GetNewFrame(size, device);
 
   const int offset = (int)(AlignPointer(res->vfb->GetWritePtr(), align) - res->vfb->GetWritePtr()); // first line offset for proper alignment
 
@@ -2036,6 +2034,10 @@ PVideoFrame ScriptEnvironment::NewVideoFrame(int row_size, int height, int align
 
 
 PVideoFrame __stdcall ScriptEnvironment::NewVideoFrame(const VideoInfo& vi, int align) {
+    return NewVideoFrame(vi, align, GetCurrentDevice());
+}
+
+PVideoFrame ScriptEnvironment::NewVideoFrame(const VideoInfo& vi, int align, Device* device) {
   // todo: high bit-depth: we have too many types now. Do we need really check?
   // Check requested pixel_type:
   switch (vi.pixel_type) {
@@ -2128,17 +2130,17 @@ PVideoFrame __stdcall ScriptEnvironment::NewVideoFrame(const VideoInfo& vi, int 
 
         const int heightUV = vi.height >> vi.GetPlaneHeightSubsampling(PLANAR_U);
 
-        retval=NewPlanarVideoFrame(vi.RowSize(PLANAR_Y), vi.height, vi.RowSize(PLANAR_U), heightUV, align, !vi.IsVPlaneFirst(), vi.IsYUVA());
+        retval=NewPlanarVideoFrame(vi.RowSize(PLANAR_Y), vi.height, vi.RowSize(PLANAR_U), heightUV, align, !vi.IsVPlaneFirst(), vi.IsYUVA(), device);
     } else {
         // plane order: G,B,R
-        retval=NewPlanarVideoFrame(vi.RowSize(PLANAR_G), vi.height, vi.RowSize(PLANAR_G), vi.height, align, !vi.IsVPlaneFirst(), vi.IsPlanarRGBA());
+        retval=NewPlanarVideoFrame(vi.RowSize(PLANAR_G), vi.height, vi.RowSize(PLANAR_G), vi.height, align, !vi.IsVPlaneFirst(), vi.IsPlanarRGBA(), device);
     }
   }
   else {
     if ((vi.width&1)&&(vi.IsYUY2()))
       ThrowError("Filter Error: Attempted to request an YUY2 frame that wasn't mod2 in width.");
 
-    retval=NewVideoFrame(vi.RowSize(), vi.height, align);
+    retval=NewVideoFrame(vi.RowSize(), vi.height, align, device);
   }
 
   return retval;
@@ -2156,15 +2158,16 @@ bool ScriptEnvironment::MakeWritable(PVideoFrame* pvf) {
   // to point to the new buffer.
   const int row_size = vf->GetRowSize();
   const int height   = vf->GetHeight();
+  Device* device = vf->GetFrameBuffer()->device;
   PVideoFrame dst;
 
   bool alpha = 0 != vf->GetPitch(PLANAR_A);
   if (vf->GetPitch(PLANAR_U)) {  // we have no videoinfo, so we assume that it is Planar if it has a U plane.
     const int row_sizeUV = vf->GetRowSize(PLANAR_U); // for Planar RGB this returns row_sizeUV which is the same for all planes
     const int heightUV   = vf->GetHeight(PLANAR_U);
-    dst = NewPlanarVideoFrame(row_size, height, row_sizeUV, heightUV, FRAME_ALIGN, false, alpha);  // Always V first on internal images
+    dst = NewPlanarVideoFrame(row_size, height, row_sizeUV, heightUV, FRAME_ALIGN, false, alpha, device);  // Always V first on internal images
   } else {
-    dst = NewVideoFrame(row_size, height, FRAME_ALIGN);
+    dst = NewVideoFrame(row_size, height, FRAME_ALIGN, device);
   }
 
   BitBlt(dst->GetWritePtr(), dst->GetPitch(), vf->GetReadPtr(), vf->GetPitch(), row_size, height);
@@ -2316,13 +2319,17 @@ void* ScriptEnvironment::ManageCache(int key, void* data) {
     if (cache_reqcap <= cache_cap)
       return 0;
 
-    if ((memory_used > memory_max) || (memory_max - memory_used < memory_max*0.1f))
+    Device* device = cache->GetDevice();
+    if ((device->memory_used > device->memory_max) || (device->memory_max - device->memory_used < device->memory_max*0.1f))
     {
       // If we don't have enough free reserves, take away a cache slot from
       // a cache instance that hasn't been used since long.
 
       for (Cache* old_cache : CacheRegistry)
       {
+        if (old_cache->GetDevice() != device) {
+            continue;
+        }
         int osize = cache->SetCacheHints(CACHE_GET_SIZE, 0);
         if (osize != 0)
         {
@@ -2772,7 +2779,7 @@ success:;
 
 
             PClip guard = MTGuard::Create(mtmode, clip, std::move(funcCtor), this);
-            *result = Cache::Create(guard, NULL, this);
+            *result = CacheGuard::Create(guard, NULL, this);
 
 #ifdef USE_MT_GUARDEXIT
             // 170531: concept introduced in r2069 is not working
@@ -2950,6 +2957,55 @@ PVideoFrame ScriptEnvironment::SubframePlanarA(PVideoFrame src, int rel_offset, 
   return SubframePlanar(src, rel_offset, new_pitch, new_row_size, new_height, rel_offsetU, rel_offsetV, new_pitchUV, rel_offsetA);
 }
 
+InternalEnvironment* ScriptEnvironment::GetCoreEnvironment()
+{
+	return this;
+}
+
+int ScriptEnvironment::SetMemoryMaxCUDA(int mem, int device_index)
+{
+    return DeviceManager.GetDevice(DEV_TYPE_CUDA, device_index)->SetMemoryMax(mem);
+}
+
+Device* ScriptEnvironment::GetDevice(int device_type, int device_index)
+{
+	return DeviceManager.GetDevice(device_type, device_index);
+}
+
+extern __declspec(thread) size_t g_thread_id;
+
+Device* ScriptEnvironment::GetCurrentDevice()
+{
+	if (g_thread_id != 0) {
+		ThrowError("Invalid ScriptEnvironment");
+	}
+    return currentDevice;
+}
+
+Device* ScriptEnvironment::SetCurrentDevice(Device* device)
+{
+	Device* old = currentDevice;
+	currentDevice = device;
+	return old;
+}
+
+PVideoFrame ScriptEnvironment::GetOnDeviceFrame(const PVideoFrame& src, Device* device)
+{
+	VideoFrame *res = GetNewFrame(src->GetFrameBuffer()->data_size, device);
+	res->offset = src->offset;
+	res->pitch = src->pitch;
+	res->row_size = src->row_size;
+	res->height = src->height;
+	res->offsetU = src->offsetU;
+	res->offsetV = src->offsetV;
+	res->pitchUV = src->pitchUV;
+	res->row_sizeUV = src->row_sizeUV;
+	res->heightUV = src->heightUV;
+	res->offsetA = src->offsetA;
+	res->pitchA = src->pitchA;
+	res->row_sizeA = src->row_sizeA;
+	return PVideoFrame(res);
+}
 
 extern void ApplyMessage(PVideoFrame* frame, const VideoInfo& vi,
   const char* message, int size, int textcolor, int halocolor, int bgcolor,

@@ -59,6 +59,14 @@ elseif (MINGW)
   target_link_libraries("AvsCore" "uuid" "winmm" "vfw32" "msacm32" "gdi32" "user32" "advapi32" "ole32" "imagehlp.lib")
 endif()
 
+# CUDA
+find_package(CUDA)
+if(CUDA_FOUND)
+  target_include_directories("AvsCore" PRIVATE ${CUDA_INCLUDE_DIRS})
+  target_link_libraries ("AvsCore" ${CUDA_LIBRARIES})
+  target_compile_definitions("AvsCore" PUBLIC ENABLE_CUDA)
+endif (CUDA_FOUND)
+
 if (MSVC_IDE)    
   # Copy output to a common folder for easy deployment
   add_custom_command(

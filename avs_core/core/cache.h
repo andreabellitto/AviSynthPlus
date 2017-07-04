@@ -36,6 +36,8 @@
 #define __Cache_H__
 
 #include <avisynth.h>
+#include <mutex>
+#include <vector>
 #ifdef _DEBUG
 #include <string>
 #endif
@@ -48,13 +50,14 @@ private:
 
   IScriptEnvironment* Env;
   CachePimpl* _pimpl;
+  Device* device;
   void FillAudioZeros(void* buf, int start_offset, int count);
 
 public:
 #ifdef _DEBUG  
   std::string FuncName = ""; // P.F. Invoked function's name whose queue owns the cache object
 #endif
-  Cache(const PClip& child, IScriptEnvironment* env);
+  Cache(const PClip& child, Device* device, IScriptEnvironment* env);
   ~Cache();
   PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env);
   void __stdcall GetAudio(void* buf, __int64 start, __int64 count, IScriptEnvironment* env);
@@ -62,8 +65,49 @@ public:
   bool __stdcall GetParity(int n);
   int __stdcall SetCacheHints(int cachehints,int frame_range);
 
-  static AVSValue __cdecl Create(AVSValue args, void*, IScriptEnvironment* env);
-  static bool __stdcall IsCache(const PClip& c);
+  Device* GetDevice() const { return device; }
+
+  //static AVSValue __cdecl Create(AVSValue args, void*, IScriptEnvironment* env);
+  //static bool __stdcall IsCache(const PClip& c);
+
+};
+
+class CacheGuard : public IClip
+{
+private:
+	struct CacheHints {
+		size_t min, max;
+		CachePolicyHint AudioPolicy;
+
+		CacheHints() :
+			min(0), max(std::numeric_limits<size_t>::max()), AudioPolicy(CACHE_AUDIO)
+		{ }
+	};
+
+    PClip child;
+    VideoInfo vi;
+
+    std::vector<std::pair<Device*, PClip>> deviceCaches;
+	CacheHints hints;
+    mutable std::mutex mutex;
+
+    PClip GetCache(IScriptEnvironment* env);
+
+	void ApplyHints(int cachehints, int frame_range);
+
+	int GetOrDefault(int cachehints, int frame_range, int def);
+
+public:
+    CacheGuard(const PClip& child, IScriptEnvironment* env);
+    ~CacheGuard();
+    PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env);
+    void __stdcall GetAudio(void* buf, __int64 start, __int64 count, IScriptEnvironment* env);
+    const VideoInfo& __stdcall GetVideoInfo();
+    bool __stdcall GetParity(int n);
+    int __stdcall SetCacheHints(int cachehints, int frame_range);
+
+    static AVSValue __cdecl Create(AVSValue args, void*, IScriptEnvironment* env);
+    static bool __stdcall IsCache(const PClip& c);
 
 private:
   enum {
