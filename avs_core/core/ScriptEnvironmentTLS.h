@@ -176,7 +176,7 @@ public:
 
   PVideoFrame __stdcall NewVideoFrame(const VideoInfo& vi, int align)
   {
-	  return core->NewVideoFrame(vi, align, currentDevice);
+	  return core->NewVideoFrameOnDevice(vi, align, currentDevice);
   }
 
 
@@ -454,14 +454,24 @@ public:
 	  return core->GetDevice(device_type, device_index);
   }
 
-  PVideoFrame __stdcall NewVideoFrame(const VideoInfo& vi, int align, Device* device)
+  PVideoFrame __stdcall NewVideoFrameOnDevice(const VideoInfo& vi, int align, Device* device)
   {
-	  return core->NewVideoFrame(vi, align, device);
+	  return core->NewVideoFrameOnDevice(vi, align, device);
   }
 
-  virtual PVideoFrame __stdcall GetOnDeviceFrame(const PVideoFrame& src,  Device* device)
+  virtual PVideoFrame __stdcall GetOnDeviceFrame(PVideoFrame src,  Device* device)
   {
 	  return core->GetOnDeviceFrame(src, device);
+  }
+
+  virtual PVideoFrame __stdcall NewVideoFrame(const VideoInfo& vi, PVideoFrame propSrc, int align)
+  {
+    return core->NewVideoFrame(vi, propSrc, align);
+  }
+
+  virtual void __stdcall CopyFrameProps(PVideoFrame src, PVideoFrame dst)
+  {
+    core->CopyFrameProps(src, dst);
   }
 };
 
