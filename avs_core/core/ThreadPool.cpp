@@ -37,12 +37,12 @@ struct ThreadMessage
 #include "mpmc_bounded_queue.h"
 typedef mpmc_bounded_queue<ThreadMessage> MessageQueue;
 
-__declspec(thread) size_t g_thread_id = 0;
+__declspec(thread) size_t g_thread_id;
 
 static void ThreadFunc(size_t thread_id, MessageQueue *msgQueue)
 {
   ScriptEnvironmentTLS EnvTLS(thread_id);
-  g_thread_id = thread_id;
+	g_thread_id = thread_id;
 
   bool runThread = true;
   while(runThread)
@@ -111,14 +111,15 @@ public:
   {}
 };
 
-ThreadPool::ThreadPool(size_t nThreads) :
+ThreadPool::ThreadPool(size_t nThreads, size_t nStartId) :
   _pimpl(new ThreadPoolPimpl(nThreads))
 {
   _pimpl->Threads.reserve(nThreads);
 
   // i is used as the thread id. Skip id zero because that is reserved for the main thread.
-  for (size_t i = 1; i <= nThreads; ++i)
-    _pimpl->Threads.emplace_back(ThreadFunc, i, &(_pimpl->MsgQueue));
+	// CUDA: thread id is controled by caller
+  for (size_t i = 0; i < nThreads; ++i)
+    _pimpl->Threads.emplace_back(ThreadFunc, i + nStartId, &(_pimpl->MsgQueue));
 }
 
 void ThreadPool::QueueJob(ThreadWorkerFuncPtr clb, void* params, InternalEnvironment *env, JobCompletion *tc)
@@ -142,17 +143,32 @@ size_t ThreadPool::NumThreads() const
   return _pimpl->Threads.size();
 }
 
+void ThreadPool::StartFinish()
+{
+	if (_pimpl->MsgQueue.is_finished() == false) {
+		for (size_t i = 0; i < _pimpl->Threads.size(); ++i)
+		{
+			_pimpl->MsgQueue.push_front(THREAD_STOP);
+		}
+		_pimpl->MsgQueue.finish();
+	}
+}
+
+void ThreadPool::Finish()
+{
+	StartFinish();
+	if (_pimpl->Threads.size() > 0) {
+		for (size_t i = 0; i < _pimpl->Threads.size(); ++i)
+		{
+			if (_pimpl->Threads[i].joinable())
+				_pimpl->Threads[i].join();
+		}
+		_pimpl->Threads.clear();
+	}
+}
+
 ThreadPool::~ThreadPool()
 {
-  for (size_t i = 0; i < _pimpl->Threads.size(); ++i)
-  {
-    _pimpl->MsgQueue.push_front(THREAD_STOP);
-  }
-  for (size_t i = 0; i < _pimpl->Threads.size(); ++i)
-  {
-    if (_pimpl->Threads[i].joinable())
-      _pimpl->Threads[i].join();
-  }
-
+	Finish();
   delete _pimpl;
 }

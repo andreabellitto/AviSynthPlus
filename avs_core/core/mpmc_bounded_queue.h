@@ -86,10 +86,12 @@ private:
   std::mutex m_mutex;
   std::condition_variable m_not_empty;
   std::condition_variable m_not_full;
+	bool finished;
 
 public:
   mpmc_bounded_queue(size_type capacity) :
-    m_container(capacity)
+    m_container(capacity),
+		finished(false)
   {
   }
 
@@ -98,9 +100,22 @@ public:
     return m_container.capacity();
   }
 
+	void finish()
+	{
+		finished = true;
+	}
+
+	bool is_finished()
+	{
+		return finished;
+	}
+
   void push_front(T const& item)
   {
     std::unique_lock<std::mutex> lock(m_mutex);
+		if (finished) {
+			throw AvisynthError("Queue already finished");
+		}
     while(m_container.full())
     {
       m_not_full.wait(lock);
@@ -115,6 +130,9 @@ public:
     std::unique_lock<std::mutex> lock(m_mutex);
     while(m_container.empty())
     {
+			if (finished) {
+				throw AvisynthError("Queue already finished");
+			}
       m_not_empty.wait(lock);
     }
     m_container.pop_back(pItem);

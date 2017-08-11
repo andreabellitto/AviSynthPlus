@@ -966,6 +966,7 @@ void AVSMapValue::CONSTRUCTOR5(const char* pdata, int size) {
 
 AVSMapValue::AVSMapValue(const AVSMapValue& other) { CONSTRUCTOR6(other); }
 void AVSMapValue::CONSTRUCTOR6(const AVSMapValue& other) {
+	type = 0;
   Set(other);
 }
 

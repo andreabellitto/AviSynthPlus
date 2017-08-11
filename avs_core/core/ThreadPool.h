@@ -86,11 +86,14 @@ private:
   ThreadPoolPimpl * const _pimpl;
 
 public:
-  ThreadPool(size_t nThreads);
+  ThreadPool(size_t nThreads, size_t nStartId);
   ~ThreadPool();
 
   void QueueJob(ThreadWorkerFuncPtr clb, void* params, InternalEnvironment *env, JobCompletion *tc);
   size_t NumThreads() const;
+
+	void StartFinish();
+	void Finish();
 };
 
 #endif  // _AVS_THREADPOOL_H

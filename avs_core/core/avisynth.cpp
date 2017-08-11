@@ -297,28 +297,28 @@ void* VideoFrame::operator new(size_t size) {
 }
 
 
-VideoFrame::VideoFrame(VideoFrameBuffer* _vfb, int _offset, int _pitch, int _row_size, int _height)
+VideoFrame::VideoFrame(VideoFrameBuffer* _vfb, AVSMap* avsmap, int _offset, int _pitch, int _row_size, int _height)
   : refcount(0), vfb(_vfb), offset(_offset), pitch(_pitch), row_size(_row_size), height(_height),
     offsetU(_offset), offsetV(_offset), pitchUV(0), row_sizeUV(0), heightUV(0)  // PitchUV=0 so this doesn't take up additional space
-    ,offsetA(0), pitchA(0), row_sizeA(0)
+    ,offsetA(0), pitchA(0), row_sizeA(0), avsmap(avsmap)
 {
   InterlockedIncrement(&vfb->refcount);
 }
 
-VideoFrame::VideoFrame(VideoFrameBuffer* _vfb, int _offset, int _pitch, int _row_size, int _height,
+VideoFrame::VideoFrame(VideoFrameBuffer* _vfb, AVSMap* avsmap, int _offset, int _pitch, int _row_size, int _height,
                        int _offsetU, int _offsetV, int _pitchUV, int _row_sizeUV, int _heightUV)
   : refcount(0), vfb(_vfb), offset(_offset), pitch(_pitch), row_size(_row_size), height(_height),
     offsetU(_offsetU), offsetV(_offsetV), pitchUV(_pitchUV), row_sizeUV(_row_sizeUV), heightUV(_heightUV)
-    ,offsetA(0), pitchA(0), row_sizeA(0)
+    ,offsetA(0), pitchA(0), row_sizeA(0), avsmap(avsmap)
 {
   InterlockedIncrement(&vfb->refcount);
 }
 
-VideoFrame::VideoFrame(VideoFrameBuffer* _vfb, int _offset, int _pitch, int _row_size, int _height,
+VideoFrame::VideoFrame(VideoFrameBuffer* _vfb, AVSMap* avsmap, int _offset, int _pitch, int _row_size, int _height,
     int _offsetU, int _offsetV, int _pitchUV, int _row_sizeUV, int _heightUV, int _offsetA)
     : refcount(0), vfb(_vfb), offset(_offset), pitch(_pitch), row_size(_row_size), height(_height),
     offsetU(_offsetU), offsetV(_offsetV), pitchUV(_pitchUV), row_sizeUV(_row_sizeUV), heightUV(_heightUV)
-    ,offsetA(_offsetA), pitchA(_pitch), row_sizeA(_row_size)
+    ,offsetA(_offsetA), pitchA(_pitch), row_sizeA(_row_size), avsmap(avsmap)
 {
     InterlockedIncrement(&vfb->refcount);
 }
@@ -328,7 +328,7 @@ VideoFrame::VideoFrame(VideoFrameBuffer* _vfb, int _offset, int _pitch, int _row
 // P.F. ?? so far it works automatically
 
 VideoFrame* VideoFrame::Subframe(int rel_offset, int new_pitch, int new_row_size, int new_height) const {
-  return new VideoFrame(vfb, offset+rel_offset, new_pitch, new_row_size, new_height);
+  return new VideoFrame(vfb, new AVSMap(), offset+rel_offset, new_pitch, new_row_size, new_height);
 }
 
 
@@ -338,7 +338,7 @@ VideoFrame* VideoFrame::Subframe(int rel_offset, int new_pitch, int new_row_size
     const int new_row_sizeUV = !row_size ? 0 : MulDiv(new_row_size, row_sizeUV, row_size);
     const int new_heightUV   = !height   ? 0 : MulDiv(new_height,   heightUV,   height);
 
-    return new VideoFrame(vfb, offset+rel_offset, new_pitch, new_row_size, new_height,
+    return new VideoFrame(vfb, new AVSMap(), offset+rel_offset, new_pitch, new_row_size, new_height,
         rel_offsetU+offsetU, rel_offsetV+offsetV, new_pitchUV, new_row_sizeUV, new_heightUV);
 }
 
@@ -349,7 +349,7 @@ VideoFrame* VideoFrame::Subframe(int rel_offset, int new_pitch, int new_row_size
     const int new_row_sizeUV = !row_size ? 0 : MulDiv(new_row_size, row_sizeUV, row_size);
     const int new_heightUV   = !height   ? 0 : MulDiv(new_height,   heightUV,   height);
 
-    return new VideoFrame(vfb, offset+rel_offset, new_pitch, new_row_size, new_height,
+    return new VideoFrame(vfb, new AVSMap(), offset+rel_offset, new_pitch, new_row_size, new_height,
         rel_offsetU+offsetU, rel_offsetV+offsetV, new_pitchUV, new_row_sizeUV, new_heightUV, rel_offsetA+offsetA);
 }
 
@@ -689,7 +689,6 @@ public:
   virtual bool __stdcall InternalFunctionExists(const char* name);
   virtual int __stdcall IncrImportDepth();
   virtual int __stdcall DecrImportDepth();
-  virtual void __stdcall SetPrefetcher(Prefetcher *p);
   virtual void __stdcall AdjustMemoryConsumption(size_t amount, bool minus);
   virtual bool __stdcall Invoke(AVSValue *result, const char* name, const AVSValue& args, const char* const* arg_names=0);
   virtual void __stdcall SetFilterMTMode(const char* filter, MtMode mode, bool force);
@@ -717,8 +716,8 @@ public:
   virtual Device* __stdcall GetCurrentDevice();
   virtual Device* __stdcall SetCurrentDevice(Device* device);
   virtual PVideoFrame __stdcall GetOnDeviceFrame(PVideoFrame src, Device* device);
-  virtual PVideoFrame __stdcall NewVideoFrame(const VideoInfo& vi, PVideoFrame propSrc, int align);
   virtual void __stdcall CopyFrameProps(PVideoFrame src, PVideoFrame dst);
+	virtual ThreadPool* __stdcall NewThreadPool(size_t nThreads);
 
 private:
 
@@ -796,7 +795,10 @@ private:
 
   typedef std::vector<MTGuard*> MTGuardRegistryType;
   MTGuardRegistryType MTGuardRegistry;
-  Prefetcher *prefetcher;
+
+	std::vector <std::unique_ptr<ThreadPool>> ThreadPoolRegistry;
+	size_t nTotalThreads;
+	size_t nMaxFilterInstances;
 
   // Members used to reconstruct Association between Invoke() calls and filter instances
   std::stack<MtModeEvaluator*> invoke_stack;
@@ -864,7 +866,8 @@ ScriptEnvironment::ScriptEnvironment()
     ImportDepth(0),
     DeviceManager(this),
     FrontCache(NULL),
-    prefetcher(NULL),
+		nTotalThreads(1),
+		nMaxFilterInstances(1),
     BufferPool(this)
 {
   try {
@@ -918,7 +921,7 @@ ScriptEnvironment::ScriptEnvironment()
     global_var_table->Set("LOG_DEBUG",   (int)LOGLEVEL_DEBUG);
 
     InitMT();
-    thread_pool = new ThreadPool(std::thread::hardware_concurrency());
+    thread_pool = new ThreadPool(std::thread::hardware_concurrency(), 1);
 
     ExportBuiltinFilters();
 
@@ -974,10 +977,15 @@ ScriptEnvironment::~ScriptEnvironment() {
   // This circular reference causes leaks, so we call
   // Destroy() on the prefetcher, which will in turn terminate all
   // its TLS stuff and break the chain.
-  if (prefetcher)
-  {
-    prefetcher->Destroy();
-  }
+	for (auto& pool : ThreadPoolRegistry) {
+		// notify finishing
+		pool->StartFinish();
+	}
+	for (auto& pool : ThreadPoolRegistry) {
+		// join all threads
+		pool->Finish();
+	}
+	ThreadPoolRegistry.clear();
 
   // and deleting the frame buffer from FrameRegistry2 as well
   bool somethingLeaks = false;
@@ -1167,30 +1175,6 @@ ClipDataStore* __stdcall ScriptEnvironment::ClipData(IClip *clip)
 #endif
 }
 
-void __stdcall ScriptEnvironment::SetPrefetcher(Prefetcher *p)
-{
-  if (!p)
-  {
-    prefetcher = NULL;
-    return;
-  }
-
-  if (prefetcher != NULL)
-    throw AvisynthError("Only a single prefetcher is allowed per script.");
-
-  // Make this the active prefetcher
-  prefetcher = p;
-
-  // Since this method basically enables MT operation,
-  // upgrade all MTGuards to MT-mode.
-  size_t nTotalThreads = 1 + p->NumPrefetchThreads();
-  for (MTGuard* guard : MTGuardRegistry)
-  {
-    if (guard != NULL)
-      guard->EnableMT(nTotalThreads);
-  }
-}
-
 void __stdcall ScriptEnvironment::AdjustMemoryConsumption(size_t amount, bool minus)
 {
   if (minus)
@@ -1331,7 +1315,7 @@ size_t  __stdcall ScriptEnvironment::GetProperty(AvsEnvProperty prop)
   switch(prop)
   {
   case AEP_FILTERCHAIN_THREADS:
-    return (prefetcher != NULL) ? prefetcher->NumPrefetchThreads()+1 : 1;
+    return nMaxFilterInstances;
   case AEP_PHYSICAL_CPUS:
     return GetNumPhysicalCPUs();
   case AEP_LOGICAL_CPUS:
@@ -1514,7 +1498,7 @@ VideoFrame* ScriptEnvironment::AllocateFrame(size_t vfb_size, Device* device)
   VideoFrame *newFrame = NULL;
   try
   {
-    newFrame = new VideoFrame(vfb, 0, 0, 0, 0);
+    newFrame = new VideoFrame(vfb, new AVSMap(), 0, 0, 0, 0);
   }
   catch(const std::bad_alloc&)
   {
@@ -1522,23 +1506,11 @@ VideoFrame* ScriptEnvironment::AllocateFrame(size_t vfb_size, Device* device)
     return NULL;
   }
 
-  AVSMap *avsmap = NULL;
-  try
-  {
-    avsmap = new AVSMap();
-  }
-  catch (const std::bad_alloc&)
-  {
-    delete vfb;
-    delete newFrame;
-    return NULL;
-  }
-
   device->memory_used+=vfb_size;
 
   // automatically inserts keys if they not exist!
   // no locking here, calling method have done it already
-  FrameRegistry2[vfb_size][vfb].push_back(DebugTimestampedFrame(newFrame, avsmap));
+  FrameRegistry2[vfb_size][vfb].push_back(DebugTimestampedFrame(newFrame, newFrame->avsmap));
 
   //_RPT1(0, "ScriptEnvironment::AllocateFrame %Iu frame=%p vfb=%p %I64d\n", vfb_size, newFrame, newFrame->vfb, memory_used); // P.F.
 
@@ -2236,7 +2208,7 @@ PVideoFrame __stdcall ScriptEnvironment::Subframe(PVideoFrame src, int rel_offse
 
   VideoFrame* subframe;
   subframe = src->Subframe(rel_offset, new_pitch, new_row_size, new_height);
-  subframe->avsmap = new AVSMap(*src->avsmap);
+  *subframe->avsmap = *src->avsmap;
 
   size_t vfb_size = src->GetFrameBuffer()->GetDataSize();
 
@@ -2258,7 +2230,7 @@ PVideoFrame __stdcall ScriptEnvironment::SubframePlanar(PVideoFrame src, int rel
     ThrowError("Filter Error: Filter attempted to break alignment of VideoFrame.");
 
   VideoFrame *subframe = src->Subframe(rel_offset, new_pitch, new_row_size, new_height, rel_offsetU, rel_offsetV, new_pitchUV);
-  subframe->avsmap = new AVSMap(*src->avsmap);
+  *subframe->avsmap = *src->avsmap;
 
   size_t vfb_size = src->GetFrameBuffer()->GetDataSize();
 
@@ -2280,7 +2252,7 @@ PVideoFrame __stdcall ScriptEnvironment::SubframePlanar(PVideoFrame src, int rel
         ThrowError("Filter Error: Filter attempted to break alignment of VideoFrame.");
     VideoFrame* subframe;
     subframe = src->Subframe(rel_offset, new_pitch, new_row_size, new_height, rel_offsetU, rel_offsetV, new_pitchUV, rel_offsetA);
-    subframe->avsmap = new AVSMap(*src->avsmap);
+    *subframe->avsmap = *src->avsmap;
 
     size_t vfb_size = src->GetFrameBuffer()->GetDataSize();
 
@@ -2394,10 +2366,9 @@ void* ScriptEnvironment::ManageCache(int key, void* data) {
     MTGuard* guard = reinterpret_cast<MTGuard*>(data);
 
     // If we already have a prefetcher, enable MT on the guard
-    if (prefetcher)
+    if (ThreadPoolRegistry.size() > 0)
     {
-      size_t nTotalThreads = 1 + prefetcher->NumPrefetchThreads();
-      guard->EnableMT(nTotalThreads);
+      guard->EnableMT(nMaxFilterInstances);
     }
 
     MTGuardRegistry.push_back(guard);
@@ -3002,12 +2973,10 @@ Device* ScriptEnvironment::GetDevice(int device_type, int device_index)
 	return DeviceManager.GetDevice(device_type, device_index);
 }
 
-extern __declspec(thread) size_t g_thread_id;
-
 Device* ScriptEnvironment::GetCurrentDevice()
 {
 	if (g_thread_id != 0) {
-		ThrowError("Invalid ScriptEnvironment");
+		ThrowError("Invalid ScriptEnvironment. You are using different thread's environment.");
 	}
     return currentDevice;
 }
@@ -3038,16 +3007,33 @@ PVideoFrame ScriptEnvironment::GetOnDeviceFrame(PVideoFrame src, Device* device)
 	return PVideoFrame(res);
 }
 
-PVideoFrame ScriptEnvironment::NewVideoFrame(const VideoInfo& vi, PVideoFrame propSrc, int align = FRAME_ALIGN)
-{
-  PVideoFrame frame = NewVideoFrame(vi, align);
-  *frame->avsmap = *propSrc->avsmap;
-  return frame;
-}
-
 void ScriptEnvironment::CopyFrameProps(PVideoFrame src, PVideoFrame dst)
 {
   *dst->avsmap = *src->avsmap;
+}
+
+ThreadPool* ScriptEnvironment::NewThreadPool(size_t nThreads)
+{
+	ThreadPool* pool = new ThreadPool(nThreads, nTotalThreads);
+	ThreadPoolRegistry.emplace_back(pool);
+
+	nTotalThreads += nThreads;
+
+	if (nMaxFilterInstances < nThreads + 1) {
+		// make 2^n
+		nMaxFilterInstances = 1;
+		while (nThreads + 1 > (nMaxFilterInstances <<= 1));
+	}
+
+	// Since this method basically enables MT operation,
+	// upgrade all MTGuards to MT-mode.
+	for (MTGuard* guard : MTGuardRegistry)
+	{
+		if (guard != NULL)
+			guard->EnableMT(nMaxFilterInstances);
+	}
+
+	return pool;
 }
 
 extern void ApplyMessage(PVideoFrame* frame, const VideoInfo& vi,
