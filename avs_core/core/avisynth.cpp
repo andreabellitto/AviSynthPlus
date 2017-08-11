@@ -60,6 +60,8 @@
 #include "cache.h"
 #include <clocale>
 
+#include "FilterGraph.h"
+
 #ifndef YieldProcessor // low power spin idle
   #define YieldProcessor() __nop(void)
 #endif
@@ -74,7 +76,8 @@ extern const AVSFunction Audio_filters[], Combine_filters[], Convert_filters[],
                    Debug_filters[], Turn_filters[],
                    Conditional_filters[], Conditional_funtions_filters[],
                    Cache_filters[], Greyscale_filters[],
-                   Swap_filters[], Overlay_filters[];
+                   Swap_filters[], Overlay_filters[],
+                   FilterGraph_filters[];
 
 
 const AVSFunction* const builtin_functions[] = {
@@ -88,7 +91,8 @@ const AVSFunction* const builtin_functions[] = {
                    Debug_filters, Turn_filters,
                    Conditional_filters, Conditional_funtions_filters,
                    Plugin_functions, Cache_filters,
-                   Overlay_filters, Greyscale_filters, Swap_filters};
+                   Overlay_filters, Greyscale_filters, Swap_filters,
+                   FilterGraph_filters };
 
 // Global statistics counters
 struct {
@@ -728,6 +732,8 @@ public:
   virtual void __stdcall VThrowError(const char* fmt, va_list va);
   virtual PVideoFrame __stdcall SubframePlanarA(PVideoFrame src, int rel_offset, int new_pitch, int new_row_size, int new_height, int rel_offsetU, int rel_offsetV, int new_pitchUV, int rel_offsetA);
 
+  virtual void __stdcall SetGraphAnalysis(bool enable);
+
 private:
 
   // Tritical May 2005
@@ -817,6 +823,9 @@ private:
   std::ofstream LogFileStream;
   std::unordered_set<OneTimeLogTicket> LogTickets;
 
+  // filter graph
+  bool graphAnalysisEnable;
+
   void InitMT();
 };
 const std::string ScriptEnvironment::DEFAULT_MODE_SPECIFIER = "DEFAULT_MT_MODE";
@@ -869,7 +878,8 @@ ScriptEnvironment::ScriptEnvironment()
     ImportDepth(0),
     FrontCache(NULL),
     prefetcher(NULL),
-    BufferPool(this)
+    BufferPool(this),
+    graphAnalysisEnable(false)
 {
   try {
     // Make sure COM is initialised
@@ -2838,6 +2848,11 @@ success:;
         *result = fret;
     }
 
+    // filter graph
+    if (graphAnalysisEnable && (*result).IsClip()) {
+      *result = new FilterGraphNode((*result).AsClip(), name, args, arg_names);
+    }
+
     // args2 and args3 are not valid after this point anymore
 #ifdef _DEBUG
     if (PrevFrontCache != FrontCache && FrontCache != NULL) // cache registering swaps frontcache to the current
@@ -2950,6 +2965,11 @@ PVideoFrame ScriptEnvironment::SubframePlanarA(PVideoFrame src, int rel_offset, 
   return SubframePlanar(src, rel_offset, new_pitch, new_row_size, new_height, rel_offsetU, rel_offsetV, new_pitchUV, rel_offsetA);
 }
 
+
+void ScriptEnvironment::SetGraphAnalysis(bool enable)
+{
+  graphAnalysisEnable = enable;
+}
 
 extern void ApplyMessage(PVideoFrame* frame, const VideoInfo& vi,
   const char* message, int size, int textcolor, int halocolor, int bgcolor,

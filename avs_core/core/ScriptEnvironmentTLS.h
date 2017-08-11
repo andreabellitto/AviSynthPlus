@@ -417,6 +417,10 @@ public:
     core->LogMsgOnce_valist(ticket, level, fmt, va);
   }
 
+  virtual void __stdcall SetGraphAnalysis(bool enable)
+  {
+    core->SetGraphAnalysis(enable);
+  }
 };
 
 
