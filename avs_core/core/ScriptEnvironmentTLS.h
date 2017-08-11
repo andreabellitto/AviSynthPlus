@@ -394,11 +394,6 @@ public:
     core->ParallelJob(jobFunc, jobData, completion);
   }
 
-  virtual void __stdcall SetPrefetcher(Prefetcher *p)
-  {
-    core->SetPrefetcher(p);
-  }
-
   virtual ClipDataStore* __stdcall ClipData(IClip *clip)
   {
     return core->ClipData(clip);
@@ -464,15 +459,15 @@ public:
 	  return core->GetOnDeviceFrame(src, device);
   }
 
-  virtual PVideoFrame __stdcall NewVideoFrame(const VideoInfo& vi, PVideoFrame propSrc, int align)
-  {
-    return core->NewVideoFrame(vi, propSrc, align);
-  }
-
   virtual void __stdcall CopyFrameProps(PVideoFrame src, PVideoFrame dst)
   {
     core->CopyFrameProps(src, dst);
   }
+
+	virtual ThreadPool* __stdcall NewThreadPool(size_t nThreads)
+	{
+		return core->NewThreadPool(nThreads);
+	}
 };
 
 #undef CHECK_THREAD

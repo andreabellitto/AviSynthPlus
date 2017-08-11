@@ -28,7 +28,7 @@ struct PrefetcherPimpl
   // Maximum number of frames to prefetch
   const int nPrefetchFrames;
 
-  ThreadPool ThreadPool;
+  ThreadPool* ThreadPool;
 
   ObjectPool<PrefetcherJobParams> JobParamsPool;
   std::mutex params_pool_mutex;
@@ -56,7 +56,6 @@ struct PrefetcherPimpl
   std::mutex worker_exception_mutex;
   std::exception_ptr worker_exception;
   bool worker_exception_present;
-  ScriptEnvironmentTLS EnvTlsMainThread;
   InternalEnvironment *EnvI;
 
   PrefetcherPimpl(const PClip& _child, int _nThreads, IScriptEnvironment2 *env2) :
@@ -64,7 +63,7 @@ struct PrefetcherPimpl
     vi(_child->GetVideoInfo()),
     nThreads(_nThreads),
     nPrefetchFrames(_nThreads * 2),
-    ThreadPool(_nThreads),
+    ThreadPool(NULL),
     LockedPattern(1),
     PatternHits(0),
     Pattern(1),
@@ -74,9 +73,9 @@ struct PrefetcherPimpl
     worker_exception_present(0),
     IsLocked(false),
     PatternMisses(0),
-    EnvTlsMainThread(env2->GetProperty(AEP_THREAD_ID)),
     EnvI(static_cast<InternalEnvironment*>(env2))
   {
+		ThreadPool = EnvI->NewThreadPool(nThreads);
   }
 };
 
@@ -131,20 +130,9 @@ void Prefetcher::Destroy()
   if (_pimpl)
   {
     PrefetcherPimpl *pimpl = _pimpl;
-    _pimpl->EnvI->SetPrefetcher(nullptr);
-
-    while (_pimpl->running_workers > 0) {
-#if defined(GCC)
-      __asm__("");
-#else
-      __noop();
-#endif
-    }
-
     _pimpl = nullptr;
     delete pimpl;
   }
-
 }
 
 Prefetcher::~Prefetcher()
@@ -181,7 +169,7 @@ int __stdcall Prefetcher::SchedulePrefetch(int current_n, int prefetch_start, In
         p->prefetcher = this;
         p->cache_handle = cache_handle;
         ++_pimpl->running_workers;
-        _pimpl->ThreadPool.QueueJob(ThreadWorker, p, env, NULL);
+        _pimpl->ThreadPool->QueueJob(ThreadWorker, p, env, NULL);
         break;
       }
     case LRU_LOOKUP_FOUND_AND_READY:      // Fall-through intentional
@@ -204,9 +192,6 @@ int __stdcall Prefetcher::SchedulePrefetch(int current_n, int prefetch_start, In
 PVideoFrame __stdcall Prefetcher::GetFrame(int n, IScriptEnvironment* env)
 {
   InternalEnvironment *envI = static_cast<InternalEnvironment*>(env);
-  ScriptEnvironmentTLS *envTLS = &_pimpl->EnvTlsMainThread;
-  envTLS->Specialize(envI, envI->GetCurrentDevice());
-
 
   int pattern = n - _pimpl->LastRequestedFrame;
   _pimpl->LastRequestedFrame = n;
@@ -288,7 +273,7 @@ PVideoFrame __stdcall Prefetcher::GetFrame(int n, IScriptEnvironment* env)
     {
       try
       {
-        result = _pimpl->child->GetFrame(n, envTLS); // P.F. fill result before Commit!
+        result = _pimpl->child->GetFrame(n, env); // P.F. fill result before Commit!
         cache_handle.first->value = result;
         // cache_handle.first->value = _pimpl->child->GetFrame(n, env); // P.F. before Commit!
   #ifdef X86_32
@@ -310,7 +295,7 @@ PVideoFrame __stdcall Prefetcher::GetFrame(int n, IScriptEnvironment* env)
     }
   case LRU_LOOKUP_NO_CACHE:
     {
-      result = _pimpl->child->GetFrame(n, envTLS);
+      result = _pimpl->child->GetFrame(n, env);
       break;
     }
   case LRU_LOOKUP_FOUND_BUT_NOTAVAIL:    // Fall-through intentional
@@ -359,17 +344,7 @@ AVSValue Prefetcher::Create(AVSValue args, void*, IScriptEnvironment* env)
 
   if (PrefetchThreads > 0)
   {
-    Prefetcher* prefetcher = new Prefetcher(child, PrefetchThreads, env);
-    try
-    {
-      envi->SetPrefetcher(prefetcher);
-      return prefetcher;
-    }
-    catch(...)
-    {
-      delete prefetcher;
-      throw;
-    }
+		return new Prefetcher(child, PrefetchThreads, env);
   }
   else
     return child;

@@ -876,10 +876,10 @@ class VideoFrame {
   // for Alpha
   VideoFrame(VideoFrameBuffer* _vfb, size_t _offset, int _pitch, int _row_size, int _height, size_t _offsetU, size_t _offsetV, int _pitchUV, int _row_sizeUV, int _heightUV, size_t _offsetA);
 #else
-  VideoFrame(VideoFrameBuffer* _vfb, int _offset, int _pitch, int _row_size, int _height);
-  VideoFrame(VideoFrameBuffer* _vfb, int _offset, int _pitch, int _row_size, int _height, int _offsetU, int _offsetV, int _pitchUV, int _row_sizeUV, int _heightUV);
+  VideoFrame(VideoFrameBuffer* _vfb, AVSMap* avsmap, int _offset, int _pitch, int _row_size, int _height);
+  VideoFrame(VideoFrameBuffer* _vfb, AVSMap* avsmap, int _offset, int _pitch, int _row_size, int _height, int _offsetU, int _offsetV, int _pitchUV, int _row_sizeUV, int _heightUV);
   // for Alpha
-  VideoFrame(VideoFrameBuffer* _vfb, int _offset, int _pitch, int _row_size, int _height, int _offsetU, int _offsetV, int _pitchUV, int _row_sizeUV, int _heightUV, int _offsetA);
+  VideoFrame(VideoFrameBuffer* _vfb, AVSMap* avsmap, int _offset, int _pitch, int _row_size, int _height, int _offsetU, int _offsetV, int _pitchUV, int _row_sizeUV, int _heightUV, int _offsetA);
 #endif
 
   void* operator new(size_t size);
@@ -1217,7 +1217,8 @@ class AVSMapValue
 {
 public:
   AVSMapValue() AVS_BakedCode(AVS_LinkCall(AVSMapValue_CONSTRUCTOR0)())
-  AVSMapValue(__int64 i) AVS_BakedCode( AVS_LinkCall(AVSMapValue_CONSTRUCTOR1)(i) )
+	AVSMapValue(int i) AVS_BakedCode(AVS_LinkCall(AVSMapValue_CONSTRUCTOR1)(i))
+  explicit AVSMapValue(__int64 i) AVS_BakedCode( AVS_LinkCall(AVSMapValue_CONSTRUCTOR1)(i) )
   AVSMapValue(const __int64* pi, int size) AVS_BakedCode(AVS_LinkCall(AVSMapValue_CONSTRUCTOR2)(pi, size))
   AVSMapValue(double d) AVS_BakedCode(AVS_LinkCall(AVSMapValue_CONSTRUCTOR3)(d))
   AVSMapValue(const double* pd, int size) AVS_BakedCode(AVS_LinkCall(AVSMapValue_CONSTRUCTOR4)(pd, size))
@@ -1446,7 +1447,6 @@ public:
   // CUDA Support
   virtual int __stdcall SetMemoryMaxCUDA(int mem, int device_index = 0) = 0;
 
-  virtual PVideoFrame __stdcall NewVideoFrame(const VideoInfo& vi, PVideoFrame propSrc, int align = FRAME_ALIGN) = 0;
   virtual void __stdcall CopyFrameProps(PVideoFrame src, PVideoFrame dst) = 0;
 
 }; // end class IScriptEnvironment2

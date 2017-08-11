@@ -493,7 +493,7 @@ AVSValue Import(AVSValue args, void*, IScriptEnvironment* env)
     TCHAR *full_path = new TCHAR[full_path_len + 1];
     WideCharToMultiByte(AreFileApisANSI() ? CP_ACP : CP_OEMCP, 0, full_path_w, -1, full_path, full_path_len + 1, NULL, NULL); // replaces out-of-CP chars by ?
     // int succ = wcstombs(full_path, full_path_w, full_path_len +1); 
-    // no good, stops at non-replacable unicode chars. If wcstombs encounters a wide character it cannot convert to a multibyte character, it returns ñ1 cast to type size_t and sets errno to EILSEQ.
+    // no good, stops at non-replacable unicode chars. If wcstombs encounters a wide character it cannot convert to a multibyte character, it returns ÅE cast to type size_t and sets errno to EILSEQ.
     // utf8
     TCHAR *full_path_utf8 = new TCHAR[full_path_len * 4 + 1];
     int utf8len = WideCharToMultiByte(CP_UTF8, 0, full_path_w, -1, NULL, 0, 0, 0) - 1; // w/o the \0 terminator
@@ -1672,7 +1672,7 @@ AVSValue StrFromUtf8(AVSValue args, void*, IScriptEnvironment* env) {
   int len2 = (int)wcslen(wsource); // must be wchars_count
   TCHAR *source_ansi = new TCHAR[len2 + 1];
   WideCharToMultiByte(CP_ACP, 0, wsource, -1, source_ansi, len2 + 1, NULL, NULL); // replaces out-of-CP chars by ?
-  // wcstombs() is not good, stops at non-replacable unicode chars. If wcstombs encounters a wide character it cannot convert to a multibyte character, it returns ñ1 cast to type size_t and sets errno to EILSEQ.
+  // wcstombs() is not good, stops at non-replacable unicode chars. If wcstombs encounters a wide character it cannot convert to a multibyte character, it returns ÅE cast to type size_t and sets errno to EILSEQ.
 
   AVSValue ret = env->SaveString(source_ansi);
 
@@ -1715,7 +1715,7 @@ AVSValue StrFromUtf8(AVSValue args, void*, IScriptEnvironment* env) {
   TCHAR *full_path = new TCHAR[full_path_len + 1];
   WideCharToMultiByte(AreFileApisANSI() ? CP_ACP : CP_OEMCP, 0, full_path_w, -1, full_path, full_path_len + 1, NULL, NULL); // replaces out-of-CP chars by ?
                                                                                                                             // int succ = wcstombs(full_path, full_path_w, full_path_len +1); 
-                                                                                                                            // no good, stops at non-replacable unicode chars. If wcstombs encounters a wide character it cannot convert to a multibyte character, it returns ñ1 cast to type size_t and sets errno to EILSEQ.
+                                                                                                                            // no good, stops at non-replacable unicode chars. If wcstombs encounters a wide character it cannot convert to a multibyte character, it returns ÅE cast to type size_t and sets errno to EILSEQ.
                                                                                                                             // utf8
   TCHAR *full_path_utf8 = new TCHAR[full_path_len * 4 + 1];
   int utf8len = WideCharToMultiByte(CP_UTF8, 0, full_path_w, -1, NULL, 0, 0, 0) - 1; // w/o the \0 terminator

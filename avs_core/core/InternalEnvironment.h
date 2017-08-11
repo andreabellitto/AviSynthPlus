@@ -45,6 +45,9 @@ public:
 };
 
 class Device;
+class ThreadPool;
+
+extern __declspec(thread) size_t g_thread_id;
 
 // Strictly for Avisynth core only.
 // Neither host applications nor plugins should use
@@ -58,7 +61,6 @@ public:
     virtual void __stdcall AdjustMemoryConsumption(size_t amount, bool minus) = 0;
     virtual bool __stdcall FilterHasMtMode(const AVSFunction* filter) const = 0;
     virtual MtMode __stdcall GetFilterMTMode(const AVSFunction* filter, bool* is_forced) const = 0; // If filter is "", gets the default MT mode
-    virtual void __stdcall SetPrefetcher(Prefetcher *p) = 0;
     virtual ClipDataStore* __stdcall ClipData(IClip *clip) = 0;
     virtual MtMode __stdcall GetDefaultMtMode() const = 0;
     virtual void __stdcall SetLogParams(const char *target, int level) = 0;
@@ -75,6 +77,7 @@ public:
     virtual Device* __stdcall SetCurrentDevice(Device* device) = 0;
 	  virtual PVideoFrame __stdcall NewVideoFrameOnDevice(const VideoInfo& vi, int align, Device* device) = 0;
 	  virtual PVideoFrame __stdcall GetOnDeviceFrame(PVideoFrame src, Device* device) = 0;
+		virtual ThreadPool* __stdcall NewThreadPool(size_t nThreads) = 0;
 };
 
 #endif // _AVS_SCRIPTENVIRONMENT_H_INCLUDED
