@@ -718,6 +718,7 @@ public:
   virtual PVideoFrame __stdcall GetOnDeviceFrame(PVideoFrame src, Device* device);
   virtual void __stdcall CopyFrameProps(PVideoFrame src, PVideoFrame dst);
 	virtual ThreadPool* __stdcall NewThreadPool(size_t nThreads);
+  virtual void __stdcall DeviceAddCallback(void(*cb)(void*), void* user_data);
 
 private:
 
@@ -2978,7 +2979,7 @@ Device* ScriptEnvironment::GetCurrentDevice()
 	if (g_thread_id != 0) {
 		ThrowError("Invalid ScriptEnvironment. You are using different thread's environment.");
 	}
-    return currentDevice;
+  return currentDevice;
 }
 
 Device* ScriptEnvironment::SetCurrentDevice(Device* device)
@@ -3034,6 +3035,15 @@ ThreadPool* ScriptEnvironment::NewThreadPool(size_t nThreads)
 	}
 
 	return pool;
+}
+
+void ScriptEnvironment::DeviceAddCallback(void(*cb)(void*), void* user_data)
+{
+  if (g_thread_id != 0) {
+    ThrowError("Invalid ScriptEnvironment. You are using different thread's environment.");
+  }
+  DeviceCompleteCallbackData cbdata = { cb, user_data };
+  currentDevice->AddCompleteCallback(cbdata);
 }
 
 extern void ApplyMessage(PVideoFrame* frame, const VideoInfo& vi,

@@ -23,6 +23,175 @@
     } \
   } while (0)
 
+
+class CPUDevice : public Device {
+public:
+  CPUDevice(InternalEnvironment* env) : Device(DEV_TYPE_CPU, 0, env) { }
+
+  virtual int SetMemoryMax(int mem)
+  {
+    // memory_max for CPU device is not implemented here.
+    env->ThrowError("Not implemented ...");
+    return 0;
+  }
+
+  virtual BYTE* Allocate(size_t size)
+  {
+#ifdef _DEBUG
+    BYTE* data = new BYTE[size + 16];
+    int *pInt = (int *)(data + size);
+    pInt[0] = 0xDEADBEEF;
+    pInt[1] = 0xDEADBEEF;
+    pInt[2] = 0xDEADBEEF;
+    pInt[3] = 0xDEADBEEF;
+
+    static const BYTE filler[] = { 0x0A, 0x11, 0x0C, 0xA7, 0xED };
+    BYTE* pByte = data;
+    BYTE* q = pByte + size / 5 * 5;
+    for (; pByte < q; pByte += 5)
+    {
+      pByte[0] = filler[0];
+      pByte[1] = filler[1];
+      pByte[2] = filler[2];
+      pByte[3] = filler[3];
+      pByte[4] = filler[4];
+    }
+    return data;
+#else
+    return new BYTE[size];
+#endif
+  }
+
+  virtual void Free(BYTE* ptr)
+  {
+    if (ptr != nullptr) {
+      delete[] ptr;
+    }
+  }
+
+  virtual const char* GetName() const { return "CPU"; }
+
+  virtual void AddCompleteCallback(DeviceCompleteCallbackData cbdata)
+  {
+    // no need to delay, call immediately
+    cbdata.cb(cbdata.user_data);
+  }
+
+  virtual std::unique_ptr<std::vector<DeviceCompleteCallbackData>> GetAndClearCallbacks()
+  {
+    return nullptr;
+  }
+};
+
+#ifdef ENABLE_CUDA
+class CUDACPUDevice : public CPUDevice {
+public:
+  CUDACPUDevice(InternalEnvironment* env) : CPUDevice(env) { }
+
+  virtual BYTE* Allocate(size_t size)
+  {
+    unsigned int flags = cudaHostAllocMapped;
+    BYTE* data = nullptr;
+#ifdef _DEBUG
+    CUDA_CHECK(cudaHostAlloc((void**)&data, size + 16, flags));
+    int *pInt = (int *)(data + size);
+    pInt[0] = 0xDEADBEEF;
+    pInt[1] = 0xDEADBEEF;
+    pInt[2] = 0xDEADBEEF;
+    pInt[3] = 0xDEADBEEF;
+
+    static const BYTE filler[] = { 0x0A, 0x11, 0x0C, 0xA7, 0xED };
+    BYTE* pByte = data;
+    BYTE* q = pByte + size / 5 * 5;
+    for (; pByte < q; pByte += 5)
+    {
+      pByte[0] = filler[0];
+      pByte[1] = filler[1];
+      pByte[2] = filler[2];
+      pByte[3] = filler[3];
+      pByte[4] = filler[4];
+    }
+#else
+    CUDA_CHECK(cudaHostAlloc((void**)&data, size, flags));
+#endif
+    return data;
+  }
+
+  virtual void Free(BYTE* ptr)
+  {
+    if (ptr != nullptr) {
+      CUDA_CHECK(cudaFreeHost(ptr));
+    }
+  }
+
+  virtual const char* GetName() const { return "CPU(CUDAAware)"; }
+};
+#endif
+
+#ifdef ENABLE_CUDA
+class CUDADevice : public Device {
+  char name[32];
+
+  std::mutex mutex;
+  std::vector<DeviceCompleteCallbackData> callbacks;
+
+public:
+  CUDADevice(int n, InternalEnvironment* env) :
+    Device(DEV_TYPE_CUDA, n, env)
+  {
+    sprintf_s(name, "CUDA %d", n);
+
+    SetMemoryMax(768); // start with 768MB
+  }
+
+  virtual int SetMemoryMax(int mem)
+  {
+    if (mem > 0) {
+      unsigned __int64 requested = mem * 1048576ull;
+      cudaDeviceProp prop;
+      CUDA_CHECK(cudaGetDeviceProperties(&prop, device_index));
+      unsigned __int64 mem_limit = prop.totalGlobalMem;
+      memory_max = clamp(requested, 64 * 1024 * 1024ull, mem_limit - 128 * 1024 * 1024ull);
+    }
+    return (int)(memory_max / 1048576ull);
+  }
+
+  virtual BYTE* Allocate(size_t size)
+  {
+    BYTE* data = nullptr;
+    CUDA_CHECK(cudaSetDevice(device_index));
+    CUDA_CHECK(cudaMalloc((void**)&data, size));
+    return data;
+  }
+
+  virtual void Free(BYTE* ptr)
+  {
+    if (ptr != NULL) {
+      CUDA_CHECK(cudaSetDevice(device_index));
+      CUDA_CHECK(cudaFree(ptr));
+    }
+  }
+
+  virtual const char* GetName() const { return name; }
+
+  virtual void AddCompleteCallback(DeviceCompleteCallbackData cbdata)
+  {
+    std::lock_guard<std::mutex> lock(mutex);
+
+    callbacks.push_back(cbdata);
+  }
+
+  virtual std::unique_ptr<std::vector<DeviceCompleteCallbackData>> GetAndClearCallbacks()
+  {
+    std::lock_guard<std::mutex> lock(mutex);
+
+    auto *ret = new std::vector<DeviceCompleteCallbackData>(std::move(callbacks));
+    callbacks.clear();
+    return std::unique_ptr<std::vector<DeviceCompleteCallbackData>>(ret);
+  }
+};
+#endif
+
 DeviceManager::DeviceManager(InternalEnvironment* env) :
   env(env)
 {
@@ -37,7 +206,7 @@ DeviceManager::DeviceManager(InternalEnvironment* env) :
 
   // if cuda capable device is available, we always allocate with page locked memory.
   // is it OK ???
-  cpuDevice = std::unique_ptr<CPUDevice>((cuda_device_count > 0)
+  cpuDevice = std::unique_ptr<Device>((cuda_device_count > 0)
       ? new CUDACPUDevice(env)
       : new CPUDevice(env));
 #else // ENABLE_CUDA
@@ -68,123 +237,6 @@ Device* DeviceManager::GetDevice(int device_type, int device_index)
   }
   return nullptr;
 }
-
-int DeviceManager::CPUDevice::SetMemoryMax(int mem)
-{
-    // memory_max for CPU device is not implemented here.
-  env->ThrowError("Not implemented ...");
-  return 0;
-}
-
-BYTE* DeviceManager::CPUDevice::Allocate(size_t size)
-{
-#ifdef _DEBUG
-  BYTE* data = new BYTE[size + 16];
-  int *pInt = (int *)(data + size);
-  pInt[0] = 0xDEADBEEF;
-  pInt[1] = 0xDEADBEEF;
-  pInt[2] = 0xDEADBEEF;
-  pInt[3] = 0xDEADBEEF;
-
-  static const BYTE filler[] = { 0x0A, 0x11, 0x0C, 0xA7, 0xED };
-  BYTE* pByte = data;
-  BYTE* q = pByte + size / 5 * 5;
-  for (; pByte < q; pByte += 5)
-  {
-    pByte[0] = filler[0];
-    pByte[1] = filler[1];
-    pByte[2] = filler[2];
-    pByte[3] = filler[3];
-    pByte[4] = filler[4];
-  }
-  return data;
-#else
-  return new BYTE[size];
-#endif
-}
-
-void DeviceManager::CPUDevice::Free(BYTE* ptr)
-{
-  if (ptr != nullptr) {
-    delete[] ptr;
-  }
-}
-
-#ifdef ENABLE_CUDA
-
-BYTE* DeviceManager::CUDACPUDevice::Allocate(size_t size)
-{
-  unsigned int flags = cudaHostAllocMapped;
-  BYTE* data = nullptr;
-#ifdef _DEBUG
-  CUDA_CHECK(cudaHostAlloc((void**)&data, size + 16, flags));
-  int *pInt = (int *)(data + size);
-  pInt[0] = 0xDEADBEEF;
-  pInt[1] = 0xDEADBEEF;
-  pInt[2] = 0xDEADBEEF;
-  pInt[3] = 0xDEADBEEF;
-
-  static const BYTE filler[] = { 0x0A, 0x11, 0x0C, 0xA7, 0xED };
-  BYTE* pByte = data;
-  BYTE* q = pByte + size / 5 * 5;
-  for (; pByte < q; pByte += 5)
-  {
-    pByte[0] = filler[0];
-    pByte[1] = filler[1];
-    pByte[2] = filler[2];
-    pByte[3] = filler[3];
-    pByte[4] = filler[4];
-  }
-#else
-  CUDA_CHECK(cudaHostAlloc((void**)&data, size, flags));
-#endif
-  return data;
-}
-
-void DeviceManager::CUDACPUDevice::Free(BYTE* ptr)
-{
-  if (ptr != nullptr) {
-    CUDA_CHECK(cudaFreeHost(ptr));
-  }
-}
-
-DeviceManager::CUDADevice::CUDADevice(int n, InternalEnvironment* env) :
-    Device(DEV_TYPE_CUDA, n, env)
-{
-  sprintf_s(name, "CUDA %d", n);
-
-  SetMemoryMax(768); // start with 768MB
-}
-
-int DeviceManager::CUDADevice::SetMemoryMax(int mem)
-{
-  if (mem > 0) {
-    unsigned __int64 requested = mem * 1048576ull;
-    cudaDeviceProp prop;
-    CUDA_CHECK(cudaGetDeviceProperties(&prop, device_index));
-    unsigned __int64 mem_limit = prop.totalGlobalMem;
-    memory_max = clamp(requested, 64 * 1024 * 1024ull, mem_limit - 128 * 1024 * 1024ull);
-  }
-  return (int)(memory_max / 1048576ull);
-}
-
-BYTE* DeviceManager::CUDADevice::Allocate(size_t size)
-{
-  BYTE* data = nullptr;
-  CUDA_CHECK(cudaSetDevice(device_index));
-  CUDA_CHECK(cudaMalloc((void**)&data, size));
-  return data;
-}
-
-void DeviceManager::CUDADevice::Free(BYTE* ptr)
-{
-  if (ptr != NULL) {
-    CUDA_CHECK(cudaSetDevice(device_index));
-    CUDA_CHECK(cudaFree(ptr));
-  }
-}
-
-#endif // #ifdef ENABLE_CUDA
 
 class QueuePrefetcher
 {
@@ -375,6 +427,7 @@ class CUDAFrameTransferEngine : public FrameTransferEngine
         PVideoFrame src;
         CacheType::handle cacheHandle;
         cudaEvent_t completeEvent;
+        std::unique_ptr<std::vector<DeviceCompleteCallbackData>> completeCallbacks;
     };
 
   int prefetchFrames;
@@ -383,7 +436,7 @@ class CUDAFrameTransferEngine : public FrameTransferEngine
 
   std::mutex mutex;
   cudaStream_t stream;
-    std::deque<QueueItem> prefetchQueue;
+  std::deque<QueueItem> prefetchQueue;
 
   cudaMemcpyKind GetMemcpyKind()
   {
@@ -403,6 +456,15 @@ class CUDAFrameTransferEngine : public FrameTransferEngine
     return cudaMemcpyDefault;
   }
 
+  void ExecuteCallbacks(const std::vector<DeviceCompleteCallbackData>* callbacks)
+  {
+    if (callbacks != nullptr) {
+      for (auto cbdata : *callbacks) {
+        cbdata.cb(cbdata.user_data);
+      }
+    }
+  }
+
   PVideoFrame GetFrameImmediate(int n, InternalEnvironment* env)
   {
     PVideoFrame src = child.GetFrame(n, env);
@@ -418,12 +480,14 @@ class CUDAFrameTransferEngine : public FrameTransferEngine
 
     CUDA_CHECK(cudaMemcpy(dstptr, srcptr, sz, kind));
 
+    ExecuteCallbacks(downstreamDevice->GetAndClearCallbacks().get());
+
     return dst;
   }
 
   QueueItem SetupTransfer(int n, CacheType::handle& cacheHandle, InternalEnvironment* env)
   {
-    QueueItem item = { (size_t)n, child.GetFrame(n, env), cacheHandle, nullptr };
+    QueueItem item = { (size_t)n, child.GetFrame(n, env), cacheHandle, nullptr, nullptr };
     cacheHandle.first->value = env->GetOnDeviceFrame(item.src, downstreamDevice);
     CUDA_CHECK(cudaEventCreate(&item.completeEvent));
 
@@ -435,10 +499,12 @@ class CUDAFrameTransferEngine : public FrameTransferEngine
     int sz = srcvfb->GetDataSize();
     cudaMemcpyKind kind = GetMemcpyKind();
 
+    item.completeCallbacks = upstreamDevice->GetAndClearCallbacks();
+
     CUDA_CHECK(cudaMemcpyAsync(dstptr, srcptr, sz, kind, stream));
     CUDA_CHECK(cudaEventRecord(item.completeEvent, stream));
 
-    return item;
+    return std::move(item);
   }
 
   int SchedulePrefetch(int currentN, int prefetchStart, InternalEnvironment* env)
@@ -454,7 +520,7 @@ class CUDAFrameTransferEngine : public FrameTransferEngine
         case LRU_LOOKUP_NOT_FOUND:
         {
           try {
-            prefetchQueue.push_back(SetupTransfer(n, cacheHandle, env));
+            prefetchQueue.emplace_back(SetupTransfer(n, cacheHandle, env));
           }
           catch(...) {
             videoCache->rollback(&cacheHandle);
@@ -491,6 +557,7 @@ class CUDAFrameTransferEngine : public FrameTransferEngine
 
         // transfer is complete
         CUDA_CHECK(cudaEventDestroy(item.completeEvent));
+        ExecuteCallbacks(item.completeCallbacks.get());
 
         videoCache->commit_value(&item.cacheHandle);
       }
@@ -509,6 +576,7 @@ class CUDAFrameTransferEngine : public FrameTransferEngine
       try {
         CUDA_CHECK(cudaEventSynchronize(item.completeEvent));
         CUDA_CHECK(cudaEventDestroy(item.completeEvent));
+        ExecuteCallbacks(item.completeCallbacks.get());
 
         PVideoFrame frame = item.cacheHandle.first->value; // fill before Commit !!!
 
@@ -565,6 +633,7 @@ public:
     for (auto& item : prefetchQueue) {
       cudaEventSynchronize(item.completeEvent);
       cudaEventDestroy(item.completeEvent);
+      ExecuteCallbacks(item.completeCallbacks.get());
       videoCache->commit_value(&item.cacheHandle);
     }
     prefetchQueue.clear();
@@ -646,7 +715,7 @@ class OnDevice : public GenericVideoFilter
   Device* upstreamDevice;
   int prefetchFrames;
 
-    QueuePrefetcher prefetcher;
+  QueuePrefetcher prefetcher;
 
   std::mutex mutex;
   std::map<Device*, std::unique_ptr<FrameTransferEngine>> transferEngines;
@@ -688,7 +757,7 @@ public:
     // Get frame via transfer engine
     PVideoFrame frame = GetOrCreateTransferEngine(downstreamDevice, env)->GetFrame(n, env);
 
-        env->SetCurrentDevice(downstreamDevice);
+    env->SetCurrentDevice(downstreamDevice);
     return frame;
   }
 
@@ -697,7 +766,7 @@ public:
     InternalEnvironment* env = static_cast<InternalEnvironment*>(env_);
     Device* downstreamDevice = env->SetCurrentDevice(upstreamDevice);
     child->GetAudio(buf, start, count, env);
-        env->SetCurrentDevice(downstreamDevice);
+    env->SetCurrentDevice(downstreamDevice);
   }
 
   int __stdcall SetCacheHints(int cachehints, int frame_range)

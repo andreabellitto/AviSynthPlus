@@ -6,6 +6,7 @@
 #include "vartable.h"
 #include "ThreadPool.h"
 #include "BufferPool.h"
+#include "DeviceManager.h"
 #include "InternalEnvironment.h"
 
 extern __declspec(thread) size_t g_thread_id;
@@ -177,6 +178,13 @@ public:
   PVideoFrame __stdcall NewVideoFrame(const VideoInfo& vi, int align)
   {
 	  return core->NewVideoFrameOnDevice(vi, align, currentDevice);
+  }
+
+  virtual void __stdcall DeviceAddCallback(void(*cb)(void*), void* user_data)
+  {
+    CHECK_THREAD;
+    DeviceCompleteCallbackData cbdata = { cb, user_data };
+    currentDevice->AddCompleteCallback(cbdata);
   }
 
 
