@@ -12,6 +12,11 @@ enum {
     DEV_TYPE_CUDA,
 };
 
+struct DeviceCompleteCallbackData {
+  void(*cb)(void*);
+  void* user_data;
+};
+
 class Device {
 protected:
     InternalEnvironment* env;
@@ -37,48 +42,15 @@ public:
     virtual BYTE* Allocate(size_t sz) = 0;
     virtual void Free(BYTE* ptr) = 0;
     virtual const char* GetName() const = 0;
+    virtual void AddCompleteCallback(DeviceCompleteCallbackData cbdata) = 0;
+    virtual std::unique_ptr<std::vector<DeviceCompleteCallbackData>> GetAndClearCallbacks() = 0;
 };
 
 class DeviceManager {
 private:
-    class CPUDevice : public Device {
-    public:
-        CPUDevice(InternalEnvironment* env) : Device(DEV_TYPE_CPU, 0, env) { }
-
-        virtual int SetMemoryMax(int mem);
-        virtual BYTE* Allocate(size_t sz);
-        virtual void Free(BYTE* ptr);
-        virtual const char* GetName() const { return "CPU"; }
-    };
-
-#ifdef ENABLE_CUDA
-    class CUDACPUDevice : public CPUDevice {
-    public:
-        CUDACPUDevice(InternalEnvironment* env) : CPUDevice(env) { }
-
-        virtual BYTE* Allocate(size_t sz);
-        virtual void Free(BYTE* ptr);
-        virtual const char* GetName() const { return "CPU(CUDAAware)"; }
-    };
-#endif
-
-    InternalEnvironment *env;
-    std::unique_ptr<CPUDevice> cpuDevice;
-
-#ifdef ENABLE_CUDA
-    class CUDADevice : public Device {
-        char name[32];
-    public:
-        CUDADevice(int n, InternalEnvironment* env);
-
-        virtual int SetMemoryMax(int mem);
-        virtual BYTE* Allocate(size_t sz);
-        virtual void Free(BYTE* ptr);
-        virtual const char* GetName() const { return name; }
-    };
-
-    std::vector<std::unique_ptr<CUDADevice>> cudaDevices;
-#endif
+  InternalEnvironment *env;
+  std::unique_ptr<Device> cpuDevice;
+  std::vector<std::unique_ptr<Device>> cudaDevices;
 
 public:
     DeviceManager(InternalEnvironment* env);
@@ -87,5 +59,4 @@ public:
     Device* GetDevice(int device_type, int device_index);
 
     Device* GetCPUDevice() { return GetDevice(0, 0); }
-
 };

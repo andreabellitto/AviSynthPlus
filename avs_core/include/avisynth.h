@@ -1445,9 +1445,9 @@ public:
     int new_height, int rel_offsetU, int rel_offsetV, int new_pitchUV, int rel_offsetA) = 0;
 
   // CUDA Support
-  virtual int __stdcall SetMemoryMaxCUDA(int mem, int device_index = 0) = 0;
-
   virtual void __stdcall CopyFrameProps(PVideoFrame src, PVideoFrame dst) = 0;
+  virtual int __stdcall SetMemoryMaxCUDA(int mem, int device_index = 0) = 0;
+  virtual void __stdcall DeviceAddCallback(void(*cb)(void*), void* user_data) = 0;
 
 }; // end class IScriptEnvironment2
 
