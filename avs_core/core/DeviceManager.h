@@ -7,11 +7,6 @@
 
 class InternalEnvironment;
 
-enum {
-    DEV_TYPE_CPU = 0,
-    DEV_TYPE_CUDA,
-};
-
 struct DeviceCompleteCallbackData {
   void(*cb)(void*);
   void* user_data;
@@ -23,17 +18,19 @@ protected:
 
 public:
     const int device_type;
+    const int device_id;
     const int device_index;
 
     unsigned __int64 memory_max;
     std::atomic<unsigned __int64> memory_used;
 
-    Device(int type, int index, InternalEnvironment* env) :
-		env(env),
-        device_type(type),
-        device_index(index),
-		memory_max(0),
-		memory_used(0)
+    Device(int type, int id, int index, InternalEnvironment* env) :
+		  env(env),
+      device_type(type),
+      device_id(id),
+      device_index(index),
+		  memory_max(0),
+		  memory_used(0)
     { }
 
     virtual ~Device() { }
@@ -44,6 +41,7 @@ public:
     virtual const char* GetName() const = 0;
     virtual void AddCompleteCallback(DeviceCompleteCallbackData cbdata) = 0;
     virtual std::unique_ptr<std::vector<DeviceCompleteCallbackData>> GetAndClearCallbacks() = 0;
+    virtual void SetActiveToCurrentThread(InternalEnvironment* env) = 0;
 };
 
 class DeviceManager {
@@ -51,6 +49,7 @@ private:
   InternalEnvironment *env;
   std::unique_ptr<Device> cpuDevice;
   std::vector<std::unique_ptr<Device>> cudaDevices;
+  int numDevices;
 
 public:
     DeviceManager(InternalEnvironment* env);
@@ -59,4 +58,6 @@ public:
     Device* GetDevice(int device_type, int device_index);
 
     Device* GetCPUDevice() { return GetDevice(0, 0); }
+
+    int GetNumDevices() const { return numDevices; }
 };

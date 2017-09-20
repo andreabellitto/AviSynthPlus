@@ -26,7 +26,7 @@
 
 class CPUDevice : public Device {
 public:
-  CPUDevice(InternalEnvironment* env) : Device(DEV_TYPE_CPU, 0, env) { }
+  CPUDevice(InternalEnvironment* env) : Device(DEV_TYPE_CPU, 0, 0, env) { }
 
   virtual int SetMemoryMax(int mem)
   {
@@ -81,6 +81,11 @@ public:
   {
     return nullptr;
   }
+
+  virtual void SetActiveToCurrentThread(InternalEnvironment* env)
+  {
+    // do nothing
+  }
 };
 
 #ifdef ENABLE_CUDA
@@ -130,14 +135,35 @@ public:
 
 #ifdef ENABLE_CUDA
 class CUDADevice : public Device {
+  class ScopedCUDADevice
+  {
+    int old_device;
+    int tgt_device;
+  public:
+    ScopedCUDADevice(int device_index, IScriptEnvironment* env)
+      : tgt_device(device_index)
+    {
+      CUDA_CHECK(cudaGetDevice(&old_device));
+      if (tgt_device != old_device) {
+        CUDA_CHECK(cudaSetDevice(tgt_device));
+      }
+    }
+    ~ScopedCUDADevice()
+    {
+      if (tgt_device != old_device) {
+        cudaSetDevice(old_device);
+      }
+    }
+  };
+
   char name[32];
 
   std::mutex mutex;
   std::vector<DeviceCompleteCallbackData> callbacks;
 
 public:
-  CUDADevice(int n, InternalEnvironment* env) :
-    Device(DEV_TYPE_CUDA, n, env)
+  CUDADevice(int id, int n, InternalEnvironment* env) :
+    Device(DEV_TYPE_CUDA, id, n, env)
   {
     sprintf_s(name, "CUDA %d", n);
 
@@ -159,7 +185,7 @@ public:
   virtual BYTE* Allocate(size_t size)
   {
     BYTE* data = nullptr;
-    CUDA_CHECK(cudaSetDevice(device_index));
+    ScopedCUDADevice d(device_index, env);
     CUDA_CHECK(cudaMalloc((void**)&data, size));
     return data;
   }
@@ -167,7 +193,7 @@ public:
   virtual void Free(BYTE* ptr)
   {
     if (ptr != NULL) {
-      CUDA_CHECK(cudaSetDevice(device_index));
+      ScopedCUDADevice d(device_index, env);
       CUDA_CHECK(cudaFree(ptr));
     }
   }
@@ -185,9 +211,18 @@ public:
   {
     std::lock_guard<std::mutex> lock(mutex);
 
-    auto *ret = new std::vector<DeviceCompleteCallbackData>(std::move(callbacks));
-    callbacks.clear();
-    return std::unique_ptr<std::vector<DeviceCompleteCallbackData>>(ret);
+    if (callbacks.size() > 0) {
+      auto *ret = new std::vector<DeviceCompleteCallbackData>(std::move(callbacks));
+      callbacks.clear();
+      return std::unique_ptr<std::vector<DeviceCompleteCallbackData>>(ret);
+    }
+
+    return nullptr;
+  }
+
+  virtual void SetActiveToCurrentThread(InternalEnvironment* env)
+  {
+    CUDA_CHECK(cudaSetDevice(device_index));
   }
 };
 #endif
@@ -195,12 +230,14 @@ public:
 DeviceManager::DeviceManager(InternalEnvironment* env) :
   env(env)
 {
+  // 0 is CPU device, start from 1 for other devices.
+  int next_device_id = 1;
 
 #ifdef ENABLE_CUDA
   int cuda_device_count = 0;
   CUDA_CHECK(cudaGetDeviceCount(&cuda_device_count));
   for (int i = 0; i < cuda_device_count; ++i) {
-    cudaDevices.emplace_back(new CUDADevice(i, env));
+    cudaDevices.emplace_back(new CUDADevice(next_device_id++, i, env));
   }
   // do not modify CUDADevices after this since it causes pointer change
 
@@ -213,6 +250,7 @@ DeviceManager::DeviceManager(InternalEnvironment* env) :
   cpuDevice = std::unique_ptr<CPUDevice>(new CPUDevice(env));
 #endif // ENABLE_CUDA
 
+  numDevices = next_device_id;
 }
 
 Device* DeviceManager::GetDevice(int device_type, int device_index)
@@ -247,6 +285,7 @@ class QueuePrefetcher
   int numThreads;
 
   ThreadPool* threadPool;
+  Device* device;
 
   typedef LruCache<size_t, PVideoFrame> CacheType;
 
@@ -260,11 +299,14 @@ class QueuePrefetcher
 
   static AVSValue ThreadWorker_(IScriptEnvironment2* env, void* data)
   {
-    return static_cast<QueuePrefetcher*>(data)->ThreadWorker(env);
+    return static_cast<QueuePrefetcher*>(data)->ThreadWorker(
+      static_cast<InternalEnvironment*>(env));
   }
     
-  AVSValue ThreadWorker(IScriptEnvironment2* env)
+  AVSValue ThreadWorker(InternalEnvironment* env)
   {
+    device->SetActiveToCurrentThread(env);
+
     while (true) {
       std::pair<size_t, CacheType::handle> work;
       {
@@ -336,12 +378,13 @@ class QueuePrefetcher
   }
 
 public:
-  QueuePrefetcher(PClip child, int prefetchFrames, int numThreads, InternalEnvironment* env) :
+  QueuePrefetcher(PClip child, int prefetchFrames, int numThreads, Device* device, InternalEnvironment* env) :
       child(child),
       vi(child->GetVideoInfo()),
       prefetchFrames(prefetchFrames),
       numThreads(numThreads),
       threadPool(NULL),
+      device(device),
       videoCache(new CacheType(prefetchFrames*2)),
       numWorkers(0),
       workerExceptionPresent(false)
@@ -646,6 +689,9 @@ public:
     // Giant lock. This is OK because all transfer is done asynchronously
     std::lock_guard<std::mutex> lock(mutex);
 
+    // set upstream device
+    upstreamDevice->SetActiveToCurrentThread(env);
+
     if (prefetchFrames == 0) {
       return GetFrameImmediate(n, env);
     }
@@ -685,6 +731,9 @@ public:
 
     // Prefetch 2
     SchedulePrefetch(n, prefetchPos, env);
+
+    // set downstreamdevice
+    downstreamDevice->SetActiveToCurrentThread(env);
 
     return result;
   }
@@ -737,7 +786,7 @@ public:
     GenericVideoFilter(child),
     upstreamDevice(upstreamDevice),
     prefetchFrames(prefetchFrames),
-        prefetcher(child, prefetchFrames ? 2 : 0, 1, env)
+    prefetcher(child, prefetchFrames ? 2 : 0, 1, upstreamDevice, env)
   { }
 
   PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env_)
