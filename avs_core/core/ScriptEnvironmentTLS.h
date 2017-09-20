@@ -372,6 +372,12 @@ public:
     {
     case AEP_THREAD_ID:
       return thread_id;
+    case AEP_DEVICE_TYPE:
+      return currentDevice->device_type;
+    case AEP_DEVICE_ID:
+      return currentDevice->device_id;
+    case AEP_DEVICE_INDEX:
+      return currentDevice->device_index;
     default:
       return core->GetProperty(prop);
     }
@@ -447,9 +453,9 @@ public:
 	  return core->GetCoreEnvironment();
   }
 
-  virtual int __stdcall SetMemoryMaxCUDA(int mem, int device_index = 0)
+  virtual int __stdcall SetDeviceMemoryMax(AvsDeviceType type, int index, int mem)
   {
-      return core->SetMemoryMaxCUDA(mem, device_index);
+      return core->SetDeviceMemoryMax(type, index, mem);
   }
 
   virtual Device* __stdcall GetDevice(int device_type, int device_index)

@@ -711,7 +711,7 @@ public:
   virtual PVideoFrame __stdcall SubframePlanarA(PVideoFrame src, int rel_offset, int new_pitch, int new_row_size, int new_height, int rel_offsetU, int rel_offsetV, int new_pitchUV, int rel_offsetA);
 
   virtual InternalEnvironment* __stdcall GetCoreEnvironment();
-  virtual int __stdcall SetMemoryMaxCUDA(int mem, int device_index);
+  virtual int __stdcall SetDeviceMemoryMax(AvsDeviceType type, int index, int mem);
   virtual Device* __stdcall GetDevice(int device_type, int device_index);
   virtual Device* __stdcall GetCurrentDevice();
   virtual Device* __stdcall SetCurrentDevice(Device* device);
@@ -1327,6 +1327,14 @@ size_t  __stdcall ScriptEnvironment::GetProperty(AvsEnvProperty prop)
     return thread_pool->NumThreads();
   case AEP_VERSION:
     return AVS_SEQREV;
+  case AEP_DEVICE_TYPE:
+    return currentDevice->device_type;
+  case AEP_DEVICE_ID:
+    return currentDevice->device_id;
+  case AEP_DEVICE_INDEX:
+    return currentDevice->device_index;
+  case AEP_NUM_DEVICES:
+    return DeviceManager.GetNumDevices();
   default:
     this->ThrowError("Invalid property request.");
     return std::numeric_limits<size_t>::max();
@@ -1958,7 +1966,9 @@ PVideoFrame ScriptEnvironment::NewPlanarVideoFrame(int row_size, int height, int
   }
 
   size_t size = pitchY * height + 2 * pitchUV * heightUV + (alpha ? pitchY * height : 0);
-  size = size + align -1;
+  
+  // why we need this??
+  //size = size + align -1;
 
   VideoFrame *res = GetNewFrame(size, device);
 
@@ -2005,7 +2015,9 @@ PVideoFrame ScriptEnvironment::NewVideoFrameOnDevice(int row_size, int height, i
 
   const int pitch = AlignNumber(row_size, align);
   size_t size = pitch * height;
-  size = size + align - 1;
+
+  // why we need this??
+  //size = size + align -1;
 
   VideoFrame *res = GetNewFrame(size, device);
 
@@ -2964,9 +2976,9 @@ InternalEnvironment* ScriptEnvironment::GetCoreEnvironment()
 	return this;
 }
 
-int ScriptEnvironment::SetMemoryMaxCUDA(int mem, int device_index)
+int ScriptEnvironment::SetDeviceMemoryMax(AvsDeviceType type, int index, int mem)
 {
-    return DeviceManager.GetDevice(DEV_TYPE_CUDA, device_index)->SetMemoryMax(mem);
+    return DeviceManager.GetDevice(type, index)->SetMemoryMax(mem);
 }
 
 Device* ScriptEnvironment::GetDevice(int device_type, int device_index)
