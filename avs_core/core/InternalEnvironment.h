@@ -71,6 +71,8 @@ public:
     virtual void __stdcall VThrowError(const char* fmt, va_list va) = 0;
     virtual PVideoFrame __stdcall SubframePlanarA(PVideoFrame src, int rel_offset, int new_pitch, int new_row_size, int new_height, int rel_offsetU, int rel_offsetV, int new_pitchUV, int rel_offsetA) = 0;
 
+    virtual void __stdcall SetGraphAnalysis(bool enable) = 0;
+
 	  virtual InternalEnvironment* __stdcall GetCoreEnvironment() = 0;
 	  virtual Device* __stdcall GetDevice(int device_type, int device_index) = 0;
     virtual Device* __stdcall GetCurrentDevice() = 0;
@@ -79,5 +81,4 @@ public:
 	  virtual PVideoFrame __stdcall GetOnDeviceFrame(PVideoFrame src, Device* device) = 0;
 		virtual ThreadPool* __stdcall NewThreadPool(size_t nThreads) = 0;
 };
-
 #endif // _AVS_SCRIPTENVIRONMENT_H_INCLUDED
