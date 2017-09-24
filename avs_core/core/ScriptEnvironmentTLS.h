@@ -448,6 +448,11 @@ public:
     core->LogMsgOnce_valist(ticket, level, fmt, va);
   }
 
+  virtual void __stdcall SetGraphAnalysis(bool enable)
+  {
+    core->SetGraphAnalysis(enable);
+  }
+
   virtual InternalEnvironment* __stdcall GetCoreEnvironment()
   {
 	  return core->GetCoreEnvironment();
@@ -485,5 +490,4 @@ public:
 };
 
 #undef CHECK_THREAD
-
 #endif  // _SCRIPTENVIRONMENTTLS_H
