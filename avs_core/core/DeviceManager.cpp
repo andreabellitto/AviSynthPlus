@@ -163,6 +163,11 @@ public:
   {
     // do nothing
   }
+
+  virtual void* GetComputeStream()
+  {
+    return nullptr;
+  }
 };
 
 #ifdef ENABLE_CUDA
@@ -238,6 +243,9 @@ class CUDADevice : public Device {
   std::mutex mutex;
   std::vector<DeviceCompleteCallbackData> callbacks;
 
+  cudaStream_t computeStream;
+  cudaEvent_t computeEvent;
+
 public:
   CUDADevice(int id, int n, InternalEnvironment* env) :
     Device(DEV_TYPE_CUDA, id, n, env)
@@ -245,6 +253,15 @@ public:
     sprintf_s(name, "CUDA %d", n);
 
     SetMemoryMax(768); // start with 768MB
+
+    CUDA_CHECK(cudaStreamCreate(&computeStream));
+    CUDA_CHECK(cudaEventCreate(&computeEvent));
+  }
+
+  ~CUDADevice()
+  {
+    cudaStreamDestroy(computeStream);
+    cudaEventDestroy(computeEvent);
   }
 
   virtual int SetMemoryMax(int mem)
@@ -300,6 +317,18 @@ public:
   virtual void SetActiveToCurrentThread(InternalEnvironment* env)
   {
     CUDA_CHECK(cudaSetDevice(device_index));
+  }
+
+  virtual void* GetComputeStream() {
+    return computeStream;
+  }
+
+  void MakeStreamWaitCompute(cudaStream_t stream, InternalEnvironment* env)
+  {
+    std::lock_guard<std::mutex> lock(mutex);
+
+    CUDA_CHECK(cudaEventRecord(computeEvent, computeStream));
+    CUDA_CHECK(cudaStreamWaitEvent(stream, computeEvent, 0));
   }
 };
 #endif
@@ -621,6 +650,9 @@ class CUDAFrameTransferEngine : public FrameTransferEngine
 
     item.completeCallbacks = upstreamDevice->GetAndClearCallbacks();
 
+    if (upstreamDevice->device_type == DEV_TYPE_CUDA) {
+      static_cast<CUDADevice*>(upstreamDevice)->MakeStreamWaitCompute(stream, env);
+    }
     CUDA_CHECK(cudaMemcpyAsync(dstptr, srcptr, sz, kind, stream));
     CUDA_CHECK(cudaEventRecord(item.completeEvent, stream));
 

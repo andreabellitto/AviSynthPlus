@@ -180,6 +180,12 @@ public:
 	  return core->NewVideoFrameOnDevice(vi, align, currentDevice);
   }
 
+  virtual void* __stdcall GetDeviceStream()
+  {
+    CHECK_THREAD;
+    return currentDevice->GetComputeStream();
+  }
+
   virtual void __stdcall DeviceAddCallback(void(*cb)(void*), void* user_data)
   {
     CHECK_THREAD;
