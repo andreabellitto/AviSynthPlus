@@ -626,6 +626,10 @@ int __stdcall CacheGuard::SetCacheHints(int cachehints, int frame_range)
 	case CACHE_PREFETCH_AUDIO_GO:       // Action audio prefetch
 		break;
 
+  case CACHE_GET_DEV_TYPE:
+  case CACHE_GET_CHILD_DEV_TYPE:
+    return (child->GetVersion() >= 5) ? child->SetCacheHints(cachehints, 0) : 0;
+
 	default:
 		return 0;
 	}

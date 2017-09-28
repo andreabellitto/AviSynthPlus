@@ -57,7 +57,10 @@ public:
 
     Device* GetDevice(int device_type, int device_index);
 
-    Device* GetCPUDevice() { return GetDevice(0, 0); }
+    Device* GetCPUDevice() { return GetDevice(DEV_TYPE_CPU, 0); }
 
     int GetNumDevices() const { return numDevices; }
 };
+
+void CheckChildDeviceTypes(const PClip& child, const char* name,
+  const AVSValue& args, const char* const* argnames, IScriptEnvironment2* env);

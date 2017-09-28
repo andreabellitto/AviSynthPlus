@@ -900,7 +900,7 @@ ScriptEnvironment::ScriptEnvironment()
     ImportDepth(0),
     DeviceManager(this),
     FrontCache(NULL),
-    graphAnalysisEnable(false)
+    graphAnalysisEnable(false),
 		nTotalThreads(1),
 		nMaxFilterInstances(1),
     BufferPool(this)
@@ -2895,6 +2895,12 @@ success:;
     else
     {
         *result = fret;
+    }
+
+    // static device check
+    // this is not enough to check all dependencies but much helpful to users
+    if ((*result).IsClip()) {
+      CheckChildDeviceTypes((*result).AsClip(), name, args, arg_names, this);
     }
 
     // filter graph

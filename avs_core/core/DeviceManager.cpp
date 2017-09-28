@@ -6,6 +6,7 @@
 #include <deque>
 #include <map>
 #include <mutex>
+#include <sstream>
 #include "LruCache.h"
 #include "ThreadPool.h"
 
@@ -23,6 +24,82 @@
     } \
   } while (0)
 
+int GetDeviceTypes(const PClip& child)
+{
+  if (child->GetVersion() < 5) {
+    return DEV_TYPE_CPU;
+  }
+  int deviceflags = child->SetCacheHints(CACHE_GET_DEV_TYPE, 0);
+  if (deviceflags == 0) {
+    // if not implement CACHE_GET_DEVICE_TYPE, we assume CPU only filter.
+    deviceflags = DEV_TYPE_CPU;
+  }
+  return deviceflags;
+}
+
+int GetTargetDeviceTypes(const PClip& child)
+{
+  if (child->GetVersion() < 5) {
+    return DEV_TYPE_CPU;
+  }
+  int deviceflags = child->SetCacheHints(CACHE_GET_CHILD_DEV_TYPE, 0);
+  if (deviceflags == 0) {
+    deviceflags = child->SetCacheHints(CACHE_GET_DEV_TYPE, 0);
+    if (deviceflags == 0) {
+      // if not implement CACHE_GET_DEVICE_TYPE, we assume CPU only filter.
+      deviceflags = DEV_TYPE_CPU;
+    }
+  }
+  return deviceflags;
+}
+
+std::string DeviceTypesString(int devicetypes)
+{
+  std::vector<const char*> typesstr;
+  if (devicetypes & DEV_TYPE_CPU) {
+    typesstr.push_back("CPU");
+  }
+  if (devicetypes & DEV_TYPE_CUDA) {
+    typesstr.push_back("CUDA");
+  }
+  std::ostringstream oss;
+  for (int i = 0; i < (int)typesstr.size(); ++i) {
+    if (i > 0) oss << ",";
+    oss << typesstr[i];
+  }
+  return oss.str();
+}
+
+static void CheckDeviceTypes(const char* name, int devicetypes, const AVSValue& arr, IScriptEnvironment2* env)
+{
+  for (int i = 0; i < arr.ArraySize(); ++i) {
+    const AVSValue& val = arr[i];
+    if (val.IsClip()) {
+      int childtypes = GetDeviceTypes(val.AsClip());
+      if ((devicetypes & childtypes) == 0) {
+        std::string parentdevstr = DeviceTypesString(devicetypes);
+        std::string childdevstr = DeviceTypesString(childtypes);
+        env->ThrowError(
+          "%s: Device Unmatch: child filter [%s] does not support device(s) [%s]",
+          name, childdevstr.c_str(), parentdevstr.c_str());
+      }
+    }
+    else if (val.IsArray()) {
+      CheckDeviceTypes(name, devicetypes, val, env);
+    }
+  }
+}
+
+void CheckChildDeviceTypes(const PClip& child, const char* name, const AVSValue& args, const char* const* argnames, IScriptEnvironment2* env)
+{
+  int deviceflags = GetTargetDeviceTypes(child);
+  if (args.IsArray()) {
+    CheckDeviceTypes(name, deviceflags, args, env);
+  }
+  else {
+    CheckDeviceTypes(name, deviceflags, AVSValue(&args, 1), env);
+  }
+}
 
 class CPUDevice : public Device {
 public:
@@ -822,6 +899,12 @@ public:
   {
     if (cachehints == CACHE_GET_MTMODE) {
       return MT_NICE_FILTER;
+    }
+    if (cachehints == CACHE_GET_DEV_TYPE) {
+      return 0xFF; // any devices
+    }
+    if (cachehints == CACHE_GET_CHILD_DEV_TYPE) {
+      return upstreamDevice->device_type;
     }
     return 0;
   }
