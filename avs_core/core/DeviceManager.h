@@ -42,6 +42,7 @@ public:
     virtual void AddCompleteCallback(DeviceCompleteCallbackData cbdata) = 0;
     virtual std::unique_ptr<std::vector<DeviceCompleteCallbackData>> GetAndClearCallbacks() = 0;
     virtual void SetActiveToCurrentThread(InternalEnvironment* env) = 0;
+    virtual void* GetComputeStream() = 0;
 };
 
 class DeviceManager {
