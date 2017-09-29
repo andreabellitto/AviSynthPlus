@@ -102,8 +102,7 @@ int __stdcall NonCachedGenericVideoFilter::SetCacheHints(int cachehints, int fra
       return MT_NICE_FILTER;
 
     case CACHE_GET_DEV_TYPE:
-    case CACHE_GET_CHILD_DEV_TYPE:
-      return (child->GetVersion() >= 5) ? child->SetCacheHints(cachehints, 0) : 0;
+      return (child->GetVersion() >= 5) ? child->SetCacheHints(CACHE_GET_DEV_TYPE, 0) : 0;
 
     default:
       return GenericVideoFilter::SetCacheHints(cachehints, frame_range);
@@ -529,7 +528,6 @@ int Splice::SetCacheHints(int cachehints,int frame_range)
   case CACHE_GET_MTMODE:
     return MT_NICE_FILTER;
   case CACHE_GET_DEV_TYPE:
-  case CACHE_GET_CHILD_DEV_TYPE:
     return child_devs;
   default:
     if (passCache) {
@@ -864,8 +862,7 @@ int __stdcall AudioDub::SetCacheHints(int cachehints,int frame_range)
   case CACHE_GET_MTMODE:
     return MT_NICE_FILTER;
   case CACHE_GET_DEV_TYPE:
-  case CACHE_GET_CHILD_DEV_TYPE:
-    return (vchild->GetVersion() >= 5) ? vchild->SetCacheHints(cachehints, 0) : 0;
+    return (vchild->GetVersion() >= 5) ? vchild->SetCacheHints(CACHE_GET_DEV_TYPE, 0) : 0;
   default:
     return 0;
   }

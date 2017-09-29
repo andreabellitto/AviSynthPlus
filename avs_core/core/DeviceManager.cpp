@@ -10,6 +10,8 @@
 #include "LruCache.h"
 #include "ThreadPool.h"
 
+#define ENABLE_CUDA_COMPUTE_STREAM 0
+
 #ifdef ENABLE_CUDA
 
 #include <cuda_runtime_api.h>
@@ -37,14 +39,14 @@ int GetDeviceTypes(const PClip& child)
   return deviceflags;
 }
 
-int GetTargetDeviceTypes(const PClip& child)
+int GetTargetDeviceTypes(const PClip& clip)
 {
-  if (child->GetVersion() < 5) {
+  if (clip->GetVersion() < 5) {
     return DEV_TYPE_CPU;
   }
-  int deviceflags = child->SetCacheHints(CACHE_GET_CHILD_DEV_TYPE, 0);
+  int deviceflags = clip->SetCacheHints(CACHE_GET_CHILD_DEV_TYPE, 0);
   if (deviceflags == 0) {
-    deviceflags = child->SetCacheHints(CACHE_GET_DEV_TYPE, 0);
+    deviceflags = clip->SetCacheHints(CACHE_GET_DEV_TYPE, 0);
     if (deviceflags == 0) {
       // if not implement CACHE_GET_DEVICE_TYPE, we assume CPU only filter.
       deviceflags = DEV_TYPE_CPU;
@@ -90,9 +92,9 @@ static void CheckDeviceTypes(const char* name, int devicetypes, const AVSValue& 
   }
 }
 
-void CheckChildDeviceTypes(const PClip& child, const char* name, const AVSValue& args, const char* const* argnames, IScriptEnvironment2* env)
+void CheckChildDeviceTypes(const PClip& clip, const char* name, const AVSValue& args, const char* const* argnames, IScriptEnvironment2* env)
 {
-  int deviceflags = GetTargetDeviceTypes(child);
+  int deviceflags = GetTargetDeviceTypes(clip);
   if (args.IsArray()) {
     CheckDeviceTypes(name, deviceflags, args, env);
   }
@@ -243,8 +245,10 @@ class CUDADevice : public Device {
   std::mutex mutex;
   std::vector<DeviceCompleteCallbackData> callbacks;
 
+#if ENABLE_CUDA_COMPUTE_STREAM
   cudaStream_t computeStream;
   cudaEvent_t computeEvent;
+#endif
 
 public:
   CUDADevice(int id, int n, InternalEnvironment* env) :
@@ -253,15 +257,18 @@ public:
     sprintf_s(name, "CUDA %d", n);
 
     SetMemoryMax(768); // start with 768MB
-
+#if ENABLE_CUDA_COMPUTE_STREAM
     CUDA_CHECK(cudaStreamCreate(&computeStream));
     CUDA_CHECK(cudaEventCreate(&computeEvent));
+#endif
   }
 
   ~CUDADevice()
   {
+#if ENABLE_CUDA_COMPUTE_STREAM
     cudaStreamDestroy(computeStream);
     cudaEventDestroy(computeEvent);
+#endif
   }
 
   virtual int SetMemoryMax(int mem)
@@ -320,15 +327,21 @@ public:
   }
 
   virtual void* GetComputeStream() {
+#if ENABLE_CUDA_COMPUTE_STREAM
     return computeStream;
+#else
+    return nullptr;
+#endif
   }
 
   void MakeStreamWaitCompute(cudaStream_t stream, InternalEnvironment* env)
   {
+#if ENABLE_CUDA_COMPUTE_STREAM
     std::lock_guard<std::mutex> lock(mutex);
 
     CUDA_CHECK(cudaEventRecord(computeEvent, computeStream));
     CUDA_CHECK(cudaStreamWaitEvent(stream, computeEvent, 0));
+#endif
   }
 };
 #endif
