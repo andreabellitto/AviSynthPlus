@@ -86,11 +86,13 @@ private:
   std::mutex m_mutex;
   std::condition_variable m_not_empty;
   std::condition_variable m_not_full;
+  int m_waiting;
 	bool finished;
 
 public:
   mpmc_bounded_queue(size_type capacity) :
     m_container(capacity),
+    m_waiting(0),
 		finished(false)
   {
   }
@@ -102,41 +104,65 @@ public:
 
 	void finish()
 	{
-		finished = true;
+    std::unique_lock<std::mutex> lock(m_mutex);
+    if (finished == false) {
+      finished = true;
+      m_not_full.notify_all();
+      m_not_empty.notify_all();
+    }
 	}
 
 	bool is_finished()
 	{
+    std::unique_lock<std::mutex> lock(m_mutex);
 		return finished;
 	}
 
-  void push_front(T const& item)
+  void status(bool& finished, bool& empty, int& waiting)
+  {
+    std::unique_lock<std::mutex> lock(m_mutex);
+    finished = this->finished;
+    empty = m_container.empty();
+    waiting = m_waiting;
+  }
+
+  bool push_front(T const& item)
   {
     std::unique_lock<std::mutex> lock(m_mutex);
 		if (finished) {
-			throw AvisynthError("Queue already finished");
+      return false;
 		}
     while(m_container.full())
     {
       m_not_full.wait(lock);
+      if (finished) {
+        return false;
+      }
     }
     m_container.push_front(item);
     lock.unlock();
     m_not_empty.notify_one();
+    return true;
   }
 
-  void pop_back(value_type* pItem)
+  bool pop_back(value_type* pItem)
   {
     std::unique_lock<std::mutex> lock(m_mutex);
+    if (finished) {
+      return false;
+    }
     while(m_container.empty())
     {
-			if (finished) {
-				throw AvisynthError("Queue already finished");
-			}
+      ++m_waiting;
       m_not_empty.wait(lock);
+      --m_waiting;
+      if (finished) {
+        return false;
+      }
     }
     m_container.pop_back(pItem);
     lock.unlock();
     m_not_full.notify_one();
+    return true;
   }
 };

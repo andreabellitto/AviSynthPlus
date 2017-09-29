@@ -77,6 +77,11 @@ struct PrefetcherPimpl
   {
 		ThreadPool = EnvI->NewThreadPool(nThreads);
   }
+
+  ~PrefetcherPimpl()
+  {
+    ThreadPool->Finish();
+  }
 };
 
 

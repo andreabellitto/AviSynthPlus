@@ -1013,15 +1013,24 @@ ScriptEnvironment::~ScriptEnvironment() {
   // This circular reference causes leaks, so we call
   // Destroy() on the prefetcher, which will in turn terminate all
   // its TLS stuff and break the chain.
-	for (auto& pool : ThreadPoolRegistry) {
-		// notify finishing
-		pool->StartFinish();
-	}
-	for (auto& pool : ThreadPoolRegistry) {
-		// join all threads
-		pool->Finish();
-	}
-	ThreadPoolRegistry.clear();
+  while (true) {
+    // wait for completion
+    bool isRunning = false;
+    for (auto& pool : ThreadPoolRegistry) {
+      isRunning |= pool->IsRunning();
+      if (isRunning) break;
+    }
+    if (isRunning) {
+      Sleep(10);
+      continue;
+    }
+    // wait for thread termination
+    for (auto& pool : ThreadPoolRegistry) {
+      pool->Finish();
+    }
+    ThreadPoolRegistry.clear();
+    break;
+  }
 
   // and deleting the frame buffer from FrameRegistry2 as well
   bool somethingLeaks = false;

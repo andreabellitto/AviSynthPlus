@@ -1,5 +1,6 @@
 #include "ThreadPool.h"
 #include "ScriptEnvironmentTLS.h"
+#include "internal.h"
 #include <cassert>
 #include <thread>
 
@@ -48,7 +49,10 @@ static void ThreadFunc(size_t thread_id, MessageQueue *msgQueue)
   while(runThread)
   {
     ThreadMessage msg;
-    msgQueue->pop_back(&msg);
+    if (msgQueue->pop_back(&msg) == false) {
+      // threadpool is canceled
+      return;
+    }
 
     switch(msg.Type)
     {
@@ -135,7 +139,9 @@ void ThreadPool::QueueJob(ThreadWorkerFuncPtr clb, void* params, InternalEnviron
   else
     itemData.Promise = NULL;
 
-  _pimpl->MsgQueue.push_front(ThreadMessage(QUEUE_GENERIC_ITEM, itemData));
+  if (_pimpl->MsgQueue.push_front(ThreadMessage(QUEUE_GENERIC_ITEM, itemData)) == false) {
+    throw AvisynthError("Threadpool is canceled");
+  }
 }
 
 size_t ThreadPool::NumThreads() const
@@ -143,28 +149,47 @@ size_t ThreadPool::NumThreads() const
   return _pimpl->Threads.size();
 }
 
-void ThreadPool::StartFinish()
+bool ThreadPool::IsRunning()
 {
-	if (_pimpl->MsgQueue.is_finished() == false) {
-		for (size_t i = 0; i < _pimpl->Threads.size(); ++i)
-		{
-			_pimpl->MsgQueue.push_front(THREAD_STOP);
-		}
-		_pimpl->MsgQueue.finish();
-	}
+  if (_pimpl->Threads.size() == 0) {
+    return false;
+  }
+
+  bool empty, finished;
+  int waiting;
+  _pimpl->MsgQueue.status(finished, empty, waiting);
+
+  if (finished) {
+    return false;
+  }
+  if (empty && (waiting == (int)_pimpl->Threads.size())) {
+    return false;
+  }
+
+  return true;
+}
+
+void ThreadPool::Cancel()
+{
+  _pimpl->MsgQueue.finish();
 }
 
 void ThreadPool::Finish()
 {
-	StartFinish();
-	if (_pimpl->Threads.size() > 0) {
-		for (size_t i = 0; i < _pimpl->Threads.size(); ++i)
-		{
-			if (_pimpl->Threads[i].joinable())
-				_pimpl->Threads[i].join();
-		}
+  if (_pimpl->Threads.size() > 0) {
+    for (size_t i = 0; i < _pimpl->Threads.size(); ++i)
+    {
+      if (_pimpl->MsgQueue.push_front(THREAD_STOP) == false) {
+        break;
+      }
+    }
+    for (size_t i = 0; i < _pimpl->Threads.size(); ++i)
+    {
+      if (_pimpl->Threads[i].joinable())
+        _pimpl->Threads[i].join();
+    }
 		_pimpl->Threads.clear();
-	}
+  }
 }
 
 ThreadPool::~ThreadPool()
