@@ -80,8 +80,8 @@ static void CheckDeviceTypes(const char* name, int devicetypes, const AVSValue& 
         std::string parentdevstr = DeviceTypesString(devicetypes);
         std::string childdevstr = DeviceTypesString(childtypes);
         env->ThrowError(
-          "%s: Device Unmatch: child filter [%s] does not support device(s) [%s]",
-          name, childdevstr.c_str(), parentdevstr.c_str());
+          "Device unmatch: %s[%s] does not support [%s] frame",
+          name, parentdevstr.c_str(), childdevstr.c_str());
       }
     }
     else if (val.IsArray()) {
@@ -498,6 +498,19 @@ public:
     threadPool = env->NewThreadPool(numThreads);
   }
 
+  ~QueuePrefetcher()
+  {
+    // finish threadpool
+    threadPool->Cancel();
+    threadPool->Finish();
+
+    // cancel queue
+    while (prefetchQueue.size() > 0) {
+      videoCache->rollback(&prefetchQueue.front().second);
+      prefetchQueue.pop_front();
+    }
+  }
+
   VideoInfo GetVideoInfo() const { return vi; }
 
   PVideoFrame GetFrame(int n, InternalEnvironment* env)
@@ -563,6 +576,8 @@ public:
     upstreamDevice(upstreamDevice),
     downstreamDevice(downstreamDevice)
   { }
+
+  virtual ~FrameTransferEngine() { }
 
   virtual PVideoFrame GetFrame(int n, InternalEnvironment* env) = 0;
 };

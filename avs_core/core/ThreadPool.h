@@ -92,7 +92,8 @@ public:
   void QueueJob(ThreadWorkerFuncPtr clb, void* params, InternalEnvironment *env, JobCompletion *tc);
   size_t NumThreads() const;
 
-	void StartFinish();
+  bool IsRunning();
+  void Cancel();
 	void Finish();
 };
 
