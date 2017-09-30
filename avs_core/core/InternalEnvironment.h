@@ -77,6 +77,7 @@ public:
 	  virtual Device* __stdcall GetDevice(int device_type, int device_index) = 0;
     virtual Device* __stdcall GetCurrentDevice() = 0;
     virtual Device* __stdcall SetCurrentDevice(Device* device) = 0;
+    virtual int __stdcall SetDeviceMemoryMax(AvsDeviceType type, int index, int mem) = 0;
 	  virtual PVideoFrame __stdcall NewVideoFrameOnDevice(const VideoInfo& vi, int align, Device* device) = 0;
 	  virtual PVideoFrame __stdcall GetOnDeviceFrame(PVideoFrame src, Device* device) = 0;
 		virtual ThreadPool* __stdcall NewThreadPool(size_t nThreads) = 0;

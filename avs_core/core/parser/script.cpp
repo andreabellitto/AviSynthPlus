@@ -199,7 +199,7 @@ extern const AVSFunction Script_functions[] = {
   { "Assert", BUILTIN_FUNC_PREFIX, "b[message]s", Assert },
   { "Assert", BUILTIN_FUNC_PREFIX, "s", AssertEval },
 
-  { "SetMemoryMax", BUILTIN_FUNC_PREFIX, "[]i", SetMemoryMax },
+  { "SetMemoryMax", BUILTIN_FUNC_PREFIX, "[]i[type]i[index]i", SetDeviceMemoryMax },
 
   { "SetWorkingDir", BUILTIN_FUNC_PREFIX, "s", SetWorkingDir },
   { "Exist",         BUILTIN_FUNC_PREFIX, "s", Exist },
@@ -1579,6 +1579,20 @@ AVSValue LogMsg(AVSValue args, void*, IScriptEnvironment* env)
         envi->LogMsg(args[1].AsInt(), args[0].AsString());
     }
     return AVSValue();
+}
+
+AVSValue SetDeviceMemoryMax(AVSValue args, void*, IScriptEnvironment* env)
+{
+  int memMax = args[0].AsInt(0);
+  int deviceType = args[1].AsInt(0);
+  int deviceIndex = args[2].AsInt(0);
+
+  if (deviceType == 0 || deviceType == DEV_TYPE_CPU) {
+    return env->SetMemoryMax(memMax);
+  }
+
+  InternalEnvironment *env2 = static_cast<InternalEnvironment*>(env);
+  return env2->SetDeviceMemoryMax((AvsDeviceType)deviceType, deviceIndex, memMax);
 }
 
 AVSValue IsY(AVSValue args, void*, IScriptEnvironment* env) { return VI(args[0]).IsY(); }

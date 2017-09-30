@@ -956,6 +956,9 @@ ScriptEnvironment::ScriptEnvironment()
     global_var_table->Set("LOG_INFO",    (int)LOGLEVEL_INFO);
     global_var_table->Set("LOG_DEBUG",   (int)LOGLEVEL_DEBUG);
 
+    global_var_table->Set("DEV_TYPE_CPU", (int)DEV_TYPE_CPU);
+    global_var_table->Set("DEV_TYPE_CUDA", (int)DEV_TYPE_CUDA);
+
     InitMT();
     thread_pool = new ThreadPool(std::thread::hardware_concurrency(), 1);
 
