@@ -398,9 +398,6 @@ int VideoFrameBuffer::GetDataSize() const { return data_size; }
 int VideoFrameBuffer::GetSequenceNumber() const { return sequence_number; }
 int VideoFrameBuffer::GetRefcount() const { return refcount; }
 
-bool VideoFrameBuffer::IsCUDA() const { return device->device_type == DEV_TYPE_CUDA; }
-int VideoFrameBuffer::GetDeviceIndex() const { return device->device_index; }
-
 // end class VideoFrameBuffer
 
 /**********************************************************************/
@@ -459,8 +456,12 @@ void VideoFrame::AddRef() { InterlockedIncrement(&refcount); }
 void VideoFrame::Release() {
   VideoFrameBuffer* _vfb = vfb;
 
-  if (!InterlockedDecrement(&refcount))
+  if (!InterlockedDecrement(&refcount)) {
+    if (avsmap) {
+      avsmap->clear();
+    }
     InterlockedDecrement(&_vfb->refcount);
+  }
 }
 
 int VideoFrame::GetPitch(int plane) const { switch (plane) { case PLANAR_U: case PLANAR_V: return pitchUV; case PLANAR_A: return pitchA; } return pitch; }
@@ -539,7 +540,20 @@ BYTE* VideoFrame::GetWritePtr(int plane) const {
 }
 
 void VideoFrame::SetProps(const char* key, const AVSMapValue& value) {
-  (*avsmap)[key] = value;
+  
+  if (value.IsFrame()) {
+    const AVSMap *childmap = value.GetFrame()->avsmap;
+    for (auto it = childmap->begin(); it != childmap->end(); ++it) {
+      if (it->second.IsFrame()) {
+        // cannot contain frame recursively
+        return;
+      }
+    }
+  }
+
+  if (refcount == 1 && vfb->refcount == 1) {
+    (*avsmap)[key] = value;
+  }
 }
 
 const AVSMapValue* VideoFrame::GetProps(const char* key) const {
@@ -884,66 +898,29 @@ void AVSValue::Assign2(const AVSValue* src, bool init, bool c_arrays) {
 // class AVSMapValue
 
 enum AVS_VALUE_TYPE {
-  AVS_VALUE_BYTE = 1,
+  AVS_VALUE_FRAME = 1,
   AVS_VALUE_INT,
   AVS_VALUE_FLOAT,
-
-  AVS_VALUE_ARRAY = 16,
-
-};
-
-struct AVSMapArray {
-  volatile long refcount;
-  union {
-    int64_t i[1];
-    double d[1];
-    char data[1];
-  };
-
-  AVSMapArray() : refcount(1) { }
-
-  static AVSMapArray* Create(const int64_t* pi, int size) {
-    AVSMapArray* ret = new (operator new(sizeof(AVSMapArray) + size * sizeof(int64_t))) AVSMapArray();
-    memcpy(ret->i, pi, size * sizeof(int64_t));
-    return ret;
-  }
-  static AVSMapArray* Create(const double* pd, int size) {
-    AVSMapArray* ret = new (operator new(sizeof(AVSMapArray) + size * sizeof(double))) AVSMapArray();
-    memcpy(ret->d, pd, size * sizeof(double));
-    return ret;
-  }
-  static AVSMapArray* Create(const char* pdata, int size) {
-    AVSMapArray* ret = new (operator new(sizeof(AVSMapArray) + size * sizeof(char))) AVSMapArray();
-    memcpy(ret->data, pdata, size * sizeof(char));
-    return ret;
-  }
-
-  void AddRef() {
-    _InterlockedIncrement(&refcount);
-  }
-  void Release() {
-    if (_InterlockedDecrement(&refcount) == 0) {
-      operator delete(this);
-    }
-  }
 };
 
 AVSMapValue::AVSMapValue() { CONSTRUCTOR0(); }
 void AVSMapValue::CONSTRUCTOR0() {
   type = 0;
-  value.arr = 0;
+  value.frame = 0;
 }
 
-AVSMapValue::AVSMapValue(__int64 i) { CONSTRUCTOR1(i); }
-void AVSMapValue::CONSTRUCTOR1(__int64 i) {
+AVSMapValue::AVSMapValue(PVideoFrame& frame) { CONSTRUCTOR1(frame); }
+void AVSMapValue::CONSTRUCTOR1(PVideoFrame& frame) {
+  type = AVS_VALUE_FRAME;
+  value.frame = (VideoFrame*)(void*)frame;
+  value.frame->AddRef();
+}
+
+AVSMapValue::AVSMapValue(__int64 i) { CONSTRUCTOR2(i); }
+AVSMapValue::AVSMapValue(int i) { CONSTRUCTOR2(i); }
+void AVSMapValue::CONSTRUCTOR2(__int64 i) {
   type = AVS_VALUE_INT;
   value.i = i;
-}
-
-AVSMapValue::AVSMapValue(const __int64* pi, int size) { CONSTRUCTOR2(pi, size); }
-void AVSMapValue::CONSTRUCTOR2(const __int64* pi, int size) {
-  type = AVS_VALUE_INT | AVS_VALUE_ARRAY;
-  value.arr = AVSMapArray::Create(pi, size);
 }
 
 AVSMapValue::AVSMapValue(double d) { CONSTRUCTOR3(d); }
@@ -952,28 +929,16 @@ void AVSMapValue::CONSTRUCTOR3(double d) {
   value.d = d;
 }
 
-AVSMapValue::AVSMapValue(const double* pd, int size) { CONSTRUCTOR4(pd, size); }
-void AVSMapValue::CONSTRUCTOR4(const double* pd, int size) {
-  type = AVS_VALUE_FLOAT | AVS_VALUE_ARRAY;
-  value.arr = AVSMapArray::Create(pd, size);
-}
-
-AVSMapValue::AVSMapValue(const char* pdata, int size) { CONSTRUCTOR5(pdata, size); }
-void AVSMapValue::CONSTRUCTOR5(const char* pdata, int size) {
-  type = AVS_VALUE_INT;
-  value.arr = AVSMapArray::Create(pdata, size);
-}
-
-AVSMapValue::AVSMapValue(const AVSMapValue& other) { CONSTRUCTOR6(other); }
-void AVSMapValue::CONSTRUCTOR6(const AVSMapValue& other) {
+AVSMapValue::AVSMapValue(const AVSMapValue& other) { CONSTRUCTOR4(other); }
+void AVSMapValue::CONSTRUCTOR4(const AVSMapValue& other) {
 	type = 0;
   Set(other);
 }
 
 AVSMapValue::~AVSMapValue() { DESTRUCTOR(); }
 void AVSMapValue::DESTRUCTOR() {
-  if (type & AVS_VALUE_ARRAY)
-    value.arr->Release();
+  if (type == AVS_VALUE_FRAME)
+    value.frame->Release();
 }
 
 AVSMapValue& AVSMapValue::operator=(const AVSMapValue& other) { return OPERATOR_ASSIGN(other); }
@@ -983,27 +948,23 @@ AVSMapValue& AVSMapValue::OPERATOR_ASSIGN(const AVSMapValue& other) {
 }
 
 void AVSMapValue::Set(const AVSMapValue& other) {
-  if (type & AVS_VALUE_ARRAY)
-    value.arr->Release();
+  if (type == AVS_VALUE_FRAME)
+    value.frame->Release();
 
-  if (other.type & AVS_VALUE_ARRAY)
-    other.value.arr->AddRef();
+  if (other.type == AVS_VALUE_FRAME)
+    other.value.frame->AddRef();
 
   type = other.type;
-  value.arr = other.value.arr;
+  value.frame = other.value.frame;
 }
 
+bool AVSMapValue::IsFrame() const { return type == AVS_VALUE_FRAME; }
 bool AVSMapValue::IsInt() const { return type == AVS_VALUE_INT; }
-bool AVSMapValue::IsIntArray() const { return type == (AVS_VALUE_INT | AVS_VALUE_ARRAY); }
 bool AVSMapValue::IsFloat() const { return type == AVS_VALUE_FLOAT; }
-bool AVSMapValue::IsFloatArray() const { return type == (AVS_VALUE_FLOAT | AVS_VALUE_ARRAY); }
-bool AVSMapValue::IsData() const { return type == (AVS_VALUE_BYTE | AVS_VALUE_ARRAY); }
 
+PVideoFrame AVSMapValue::GetFrame() const { return value.frame; }
 int64_t AVSMapValue::GetInt() const { return value.i; }
-const int64_t* AVSMapValue::GetIntArray() const { return value.arr->i; }
 double AVSMapValue::GetFloat() const { return value.d; }
-const double* AVSMapValue::GetFloatArray() const { return value.arr->d; }
-const char* AVSMapValue::GetData() const { return value.arr->data; }
 
 // end class AVSMapValue
 
@@ -1216,8 +1177,6 @@ static const AVS_Linkage avs_linkage = {    // struct AVS_Linkage {
   NULL,                                     //   reserved for AviSynth+
 /**********************************************************************/
   // AviSynth+CUDA additions
-  &VideoFrameBuffer::IsCUDA,                //   bool    (VideoFrameBuffer::*IsCUDA)() const;
-  &VideoFrameBuffer::GetDeviceIndex,        //   int     (VideoFrameBuffer::*GetDeviceIndex)() const;
   &VideoFrame::SetProps,
   &VideoFrame::GetProps,
 
@@ -1227,20 +1186,14 @@ static const AVS_Linkage avs_linkage = {    // struct AVS_Linkage {
   &AVSMapValue::CONSTRUCTOR2,
   &AVSMapValue::CONSTRUCTOR3,
   &AVSMapValue::CONSTRUCTOR4,
-  &AVSMapValue::CONSTRUCTOR5,
-  &AVSMapValue::CONSTRUCTOR6,
   &AVSMapValue::DESTRUCTOR,
   &AVSMapValue::OPERATOR_ASSIGN,
+  &AVSMapValue::IsFrame,
   &AVSMapValue::IsInt,
-  &AVSMapValue::IsIntArray,
   &AVSMapValue::IsFloat,
-  &AVSMapValue::IsFloatArray,
-  &AVSMapValue::IsData,
+  &AVSMapValue::GetFrame,
   &AVSMapValue::GetInt,
-  &AVSMapValue::GetIntArray,
   &AVSMapValue::GetFloat,
-  &AVSMapValue::GetFloatArray,
-  &AVSMapValue::GetData,
 
 // this part should be identical with struct AVS_Linkage in avisynth.h
 

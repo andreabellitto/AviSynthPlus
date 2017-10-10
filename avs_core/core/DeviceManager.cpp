@@ -9,6 +9,7 @@
 #include <sstream>
 #include "LruCache.h"
 #include "ThreadPool.h"
+#include "AVSMap.h"
 
 #define ENABLE_CUDA_COMPUTE_STREAM 0
 
@@ -642,11 +643,8 @@ class CUDAFrameTransferEngine : public FrameTransferEngine
     }
   }
 
-  PVideoFrame GetFrameImmediate(int n, InternalEnvironment* env)
+  void TransferFrameData(PVideoFrame& dst, PVideoFrame& src, bool async, InternalEnvironment* env)
   {
-    PVideoFrame src = child.GetFrame(n, env);
-    PVideoFrame dst = env->GetOnDeviceFrame(src, downstreamDevice);
-
     VideoFrameBuffer* srcvfb = src->GetFrameBuffer();
     VideoFrameBuffer* dstvfb = dst->GetFrameBuffer();
 
@@ -655,7 +653,29 @@ class CUDAFrameTransferEngine : public FrameTransferEngine
     int sz = srcvfb->GetDataSize();
     cudaMemcpyKind kind = GetMemcpyKind();
 
-    CUDA_CHECK(cudaMemcpy(dstptr, srcptr, sz, kind));
+    if (async) {
+      CUDA_CHECK(cudaMemcpyAsync(dstptr, srcptr, sz, kind, stream));
+    }
+    else {
+      CUDA_CHECK(cudaMemcpy(dstptr, srcptr, sz, kind));
+    }
+  }
+
+  PVideoFrame GetFrameImmediate(int n, InternalEnvironment* env)
+  {
+    PVideoFrame src = child.GetFrame(n, env);
+    PVideoFrame dst = env->GetOnDeviceFrame(src, downstreamDevice);
+    TransferFrameData(dst, src, false, env);
+
+    AVSMap* mapv = env->GetAVSMap(dst);
+    for (auto it = mapv->begin(), end = mapv->end(); it != end; ++it) {
+      if (it->second.IsFrame()) {
+        PVideoFrame src = it->second.GetFrame();
+        PVideoFrame dst = env->GetOnDeviceFrame(src, downstreamDevice);
+        TransferFrameData(dst, src, false, env);
+        it->second = dst;
+      }
+    }
 
     ExecuteCallbacks(downstreamDevice->GetAndClearCallbacks().get());
 
@@ -668,20 +688,24 @@ class CUDAFrameTransferEngine : public FrameTransferEngine
     cacheHandle.first->value = env->GetOnDeviceFrame(item.src, downstreamDevice);
     CUDA_CHECK(cudaEventCreate(&item.completeEvent));
 
-    VideoFrameBuffer* srcvfb = item.src->GetFrameBuffer();
-    VideoFrameBuffer* dstvfb = cacheHandle.first->value->GetFrameBuffer();
-
-    const BYTE* srcptr = srcvfb->GetReadPtr();
-    BYTE* dstptr = dstvfb->GetWritePtr();
-    int sz = srcvfb->GetDataSize();
-    cudaMemcpyKind kind = GetMemcpyKind();
-
     item.completeCallbacks = upstreamDevice->GetAndClearCallbacks();
 
     if (upstreamDevice->device_type == DEV_TYPE_CUDA) {
       static_cast<CUDADevice*>(upstreamDevice)->MakeStreamWaitCompute(stream, env);
     }
-    CUDA_CHECK(cudaMemcpyAsync(dstptr, srcptr, sz, kind, stream));
+
+    TransferFrameData(cacheHandle.first->value, item.src, true, env);
+
+    AVSMap* mapv = env->GetAVSMap(cacheHandle.first->value);
+    for (auto it = mapv->begin(), end = mapv->end(); it != end; ++it) {
+      if (it->second.IsFrame()) {
+        PVideoFrame src = it->second.GetFrame();
+        PVideoFrame dst = env->GetOnDeviceFrame(src, downstreamDevice);
+        TransferFrameData(dst, src, true, env);
+        it->second = dst;
+      }
+    }
+
     CUDA_CHECK(cudaEventRecord(item.completeEvent, stream));
 
     return std::move(item);
