@@ -745,9 +745,10 @@ public:
   virtual Device* __stdcall GetDevice(int device_type, int device_index);
   virtual Device* __stdcall GetCurrentDevice();
   virtual Device* __stdcall SetCurrentDevice(Device* device);
-  virtual PVideoFrame __stdcall GetOnDeviceFrame(PVideoFrame src, Device* device);
+  virtual PVideoFrame __stdcall GetOnDeviceFrame(PVideoFrame& src, Device* device);
   virtual void __stdcall CopyFrameProps(PVideoFrame src, PVideoFrame dst);
 	virtual ThreadPool* __stdcall NewThreadPool(size_t nThreads);
+  virtual AVSMap* __stdcall GetAVSMap(PVideoFrame& frame);
   virtual void* __stdcall GetDeviceStream();
   virtual void __stdcall DeviceAddCallback(void(*cb)(void*), void* user_data);
 
@@ -1035,6 +1036,26 @@ ScriptEnvironment::~ScriptEnvironment() {
     break;
   }
 
+  // delete avsmap
+  for (FrameRegistryType2::iterator it = FrameRegistry2.begin(), end_it = FrameRegistry2.end();
+    it != end_it;
+    ++it)
+  {
+    for (FrameBufferRegistryType::iterator it2 = (it->second).begin(), end_it2 = (it->second).end();
+      it2 != end_it2;
+      ++it2)
+    {
+      for (VideoFrameArrayType::iterator it3 = it2->second.begin(), end_it3 = it2->second.end();
+        it3 != end_it3;
+        ++it3)
+      {
+        delete it3->avsmap;
+        it3->avsmap = 0;
+        it3->frame->avsmap = 0;
+      }
+    }
+  }
+
   // and deleting the frame buffer from FrameRegistry2 as well
   bool somethingLeaks = false;
   for (FrameRegistryType2::iterator it = FrameRegistry2.begin(), end_it = FrameRegistry2.end();
@@ -1055,13 +1076,11 @@ ScriptEnvironment::~ScriptEnvironment() {
         VideoFrame *frame = it3->frame;
 
         frame->vfb = 0;
-        frame->avsmap = 0;
 
         //assert(0 == frame->refcount);
         if (0 == frame->refcount)
         {
           delete frame;
-          delete it3->avsmap;
         }
         else
         {
@@ -1722,6 +1741,7 @@ VideoFrame* ScriptEnvironment::GetNewFrame(size_t vfb_size, Device* device)
           // sanity check if its refcount is zero
           // because when a vfb is free (refcount==0) then all its parent frames should also be free
           assert(0 == frame->refcount);
+          assert(0 == frame->avsmap->size());
 
           if (!found)
           {
@@ -3063,7 +3083,7 @@ Device* ScriptEnvironment::SetCurrentDevice(Device* device)
 	return old;
 }
 
-PVideoFrame ScriptEnvironment::GetOnDeviceFrame(PVideoFrame src, Device* device)
+PVideoFrame ScriptEnvironment::GetOnDeviceFrame(PVideoFrame& src, Device* device)
 {
 	VideoFrame *res = GetNewFrame(src->GetFrameBuffer()->data_size, device);
 	res->offset = src->offset;
@@ -3109,6 +3129,11 @@ ThreadPool* ScriptEnvironment::NewThreadPool(size_t nThreads)
 	}
 
 	return pool;
+}
+
+AVSMap* __stdcall ScriptEnvironment::GetAVSMap(PVideoFrame& frame)
+{
+  return frame->avsmap;
 }
 
 void* ScriptEnvironment::GetDeviceStream()

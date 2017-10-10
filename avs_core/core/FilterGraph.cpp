@@ -75,7 +75,10 @@ protected:
         ss << argnames[i] << "=";
       }
       const AVSValue& v = arr[i];
-      if (v.IsClip()) {
+      if (!v.Defined()) {
+        ss << "default";
+      }
+      else if (v.IsClip()) {
         IClip* pclip = (IClip*)(void*)v.AsClip();
         int clipnum = DoClip(pclip);
         ss << "clip" << (clipnum + 1);

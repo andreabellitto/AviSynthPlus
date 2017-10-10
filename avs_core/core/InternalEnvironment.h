@@ -79,7 +79,8 @@ public:
     virtual Device* __stdcall SetCurrentDevice(Device* device) = 0;
     virtual int __stdcall SetDeviceMemoryMax(AvsDeviceType type, int index, int mem) = 0;
 	  virtual PVideoFrame __stdcall NewVideoFrameOnDevice(const VideoInfo& vi, int align, Device* device) = 0;
-	  virtual PVideoFrame __stdcall GetOnDeviceFrame(PVideoFrame src, Device* device) = 0;
+	  virtual PVideoFrame __stdcall GetOnDeviceFrame(PVideoFrame& src, Device* device) = 0;
 		virtual ThreadPool* __stdcall NewThreadPool(size_t nThreads) = 0;
+    virtual AVSMap* __stdcall GetAVSMap(PVideoFrame& frame) = 0;
 };
 #endif // _AVS_SCRIPTENVIRONMENT_H_INCLUDED

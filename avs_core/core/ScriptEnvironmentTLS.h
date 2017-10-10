@@ -479,7 +479,7 @@ public:
 	  return core->NewVideoFrameOnDevice(vi, align, device);
   }
 
-  virtual PVideoFrame __stdcall GetOnDeviceFrame(PVideoFrame src,  Device* device)
+  virtual PVideoFrame __stdcall GetOnDeviceFrame(PVideoFrame& src,  Device* device)
   {
 	  return core->GetOnDeviceFrame(src, device);
   }
@@ -493,6 +493,11 @@ public:
 	{
 		return core->NewThreadPool(nThreads);
 	}
+
+  virtual AVSMap* __stdcall GetAVSMap(PVideoFrame& frame)
+  {
+    return core->GetAVSMap(frame);
+  }
 };
 
 #undef CHECK_THREAD
