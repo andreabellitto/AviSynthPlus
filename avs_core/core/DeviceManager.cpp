@@ -138,7 +138,7 @@ public:
     }
     return data;
 #else
-    return new BYTE[size];
+    return new BYTE[size + 16];
 #endif
   }
 
@@ -202,7 +202,7 @@ public:
       pByte[4] = filler[4];
     }
 #else
-    CUDA_CHECK(cudaHostAlloc((void**)&data, size, flags));
+    CUDA_CHECK(cudaHostAlloc((void**)&data, size + 16, flags));
 #endif
     return data;
   }
