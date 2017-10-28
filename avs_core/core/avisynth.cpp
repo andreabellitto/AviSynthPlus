@@ -2833,8 +2833,7 @@ success:;
             }
 
 
-            PClip guard = MTGuard::Create(mtmode, clip, std::move(funcCtor), this);
-            *result = CacheGuard::Create(guard, NULL, this);
+            *result = MTGuard::Create(mtmode, clip, std::move(funcCtor), this);
 
 #ifdef USE_MT_GUARDEXIT
             // 170531: concept introduced in r2069 is not working
@@ -2860,6 +2859,9 @@ success:;
             data->CreatedByInvoke = true;
         } // if (chainedCtor)
 
+				// Nekopanda: moved here from above.
+				// some filters invoke complex filters in its constructor, and they need cache.
+				*result = CacheGuard::Create(*result, NULL, this);
 
         // Check that the filter returns zero for unknown queries in SetCacheHints().
         // This is actually something we rely upon.
