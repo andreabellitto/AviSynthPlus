@@ -51,6 +51,20 @@ extern const AVSFunction Cache_filters[] = {
   { 0 }
 };
 
+class CacheStack
+{
+	InternalEnvironment* env;
+	bool retIncreaseCache;
+public:
+	CacheStack(InternalEnvironment* env)
+		: env(env)
+		, retIncreaseCache(env->increaseCache)
+	{ }
+	~CacheStack() {
+		env->increaseCache = retIncreaseCache;
+	}
+};
+
 struct CachePimpl
 {
   PClip child; 
@@ -102,8 +116,10 @@ Cache::~Cache()
   delete _pimpl;
 }
 
-PVideoFrame __stdcall Cache::GetFrame(int n, IScriptEnvironment* env)
+PVideoFrame __stdcall Cache::GetFrame(int n, IScriptEnvironment* env_)
 {
+	InternalEnvironment *env = static_cast<InternalEnvironment*>(env_);
+
   // Protect plugins that cannot handle out-of-bounds frame indices
   n = clamp(n, 0, GetVideoInfo().num_frames-1);
 
@@ -114,6 +130,8 @@ PVideoFrame __stdcall Cache::GetFrame(int n, IScriptEnvironment* env)
 
   PVideoFrame result;
   LruCache<size_t, PVideoFrame>::handle cache_handle;
+
+	CacheStack cache_stack(env);
   
 #ifdef _DEBUG	
   std::chrono::time_point<std::chrono::high_resolution_clock> t_start, t_end; 
@@ -124,12 +142,12 @@ PVideoFrame __stdcall Cache::GetFrame(int n, IScriptEnvironment* env)
   IScriptEnvironment2 *env2 = static_cast<IScriptEnvironment2*>(env);
   _snprintf(buf, 255, "Cache::GetFrame lookup follows: [%s] n=%6d Thread=%zu", name.c_str(), n, env2->GetProperty(AEP_THREAD_ID));
 
-  LruLookupResult LruLookupRes = _pimpl->VideoCache->lookup(n, &cache_handle, true, result);
+  LruLookupResult LruLookupRes = _pimpl->VideoCache->lookup(n, &cache_handle, true, result, env->increaseCache);
   _snprintf(buf, 255, "Cache::GetFrame lookup ready: [%s] n=%6d Thread=%zu res=%d", name.c_str(), n, env2->GetProperty(AEP_THREAD_ID), (int)LruLookupRes);
   switch (LruLookupRes)
 #else
   // fill result in lookup before releasing cache handle lock
-  switch(_pimpl->VideoCache->lookup(n, &cache_handle, true, result))
+  switch(_pimpl->VideoCache->lookup(n, &cache_handle, true, result, env->increaseCache))
 #endif
   {
   case LRU_LOOKUP_NOT_FOUND:

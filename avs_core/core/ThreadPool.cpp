@@ -65,6 +65,7 @@ static void ThreadFunc(size_t thread_id, MessageQueue *msgQueue)
       {
         ThreadPoolGenericItemData &data = msg.GenericWorkItemData;
         EnvTLS.Specialize(data.Environment, data.Device);
+				EnvTLS.increaseCache = true;
         if (data.Promise != NULL)
         {
           try

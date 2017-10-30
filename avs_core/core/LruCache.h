@@ -147,12 +147,12 @@ public:
     MainCache.set_limits(min, max);
   }
 
-  LruLookupResult lookup(const K& key, handle *hndl, bool block_for_completion, V& foundItem)
+  LruLookupResult lookup(const K& key, handle *hndl, bool block_for_completion, V& foundItem, bool& increaseCache)
   {
     std::unique_lock<std::mutex> global_lock(mutex);
 
     bool found;
-    entry_ptr* entryp = MainCache.lookup(key, &found);
+    entry_ptr* entryp = MainCache.lookup(key, &found, !increaseCache);
 
     if (found)
     {
@@ -188,7 +188,7 @@ public:
       --(entry->locks);
       return LRU_LOOKUP_FOUND_AND_READY;
     }
-    else
+    else if(increaseCache)
     {
       bool ghost_found;
       auto *g = Ghosts.lookup(key, &ghost_found);
@@ -201,6 +201,11 @@ public:
       {
         MainCache.resize(MainCache.capacity() + 1);
         Ghosts.resize(GHOSTS_MIN_CAPACITY + MainCache.capacity()*2);
+
+				// Nekopnada: reduce amount of cache.
+				// when this filter increased the cache, we prevent lower filters increase their cache 
+				// because the requests to the lower filters were not needed if this filter cached the frame.
+				increaseCache = false;
       }
       else
       {
@@ -224,6 +229,10 @@ public:
         return LRU_LOOKUP_NO_CACHE;
       }
     } // if
+		else {
+			assert(entryp == nullptr);
+			return LRU_LOOKUP_NO_CACHE;
+		}
   }
 
   void commit_value(handle *hndl)

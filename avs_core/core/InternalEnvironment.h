@@ -82,5 +82,8 @@ public:
 	  virtual PVideoFrame __stdcall GetOnDeviceFrame(PVideoFrame& src, Device* device) = 0;
 		virtual ThreadPool* __stdcall NewThreadPool(size_t nThreads) = 0;
     virtual AVSMap* __stdcall GetAVSMap(PVideoFrame& frame) = 0;
+
+		// Nekopanda: new cache control mechanism
+		bool increaseCache;
 };
 #endif // _AVS_SCRIPTENVIRONMENT_H_INCLUDED

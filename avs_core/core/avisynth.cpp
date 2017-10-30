@@ -967,6 +967,8 @@ ScriptEnvironment::ScriptEnvironment()
 
     clip_data.max_load_factor(0.8f);
     LogTickets.max_load_factor(0.8f);
+
+		increaseCache = true;
   }
   catch (const AvisynthError &err) {
     if(SUCCEEDED(hrfromcoinit)) {

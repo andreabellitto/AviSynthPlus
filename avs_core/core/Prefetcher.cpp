@@ -161,7 +161,8 @@ int __stdcall Prefetcher::SchedulePrefetch(int current_n, int prefetch_start, In
 
     PVideoFrame result;
     LruCache<size_t, PVideoFrame>::handle cache_handle;
-    switch(_pimpl->VideoCache->lookup(n, &cache_handle, false, result))
+		bool increaseCache = true;
+    switch(_pimpl->VideoCache->lookup(n, &cache_handle, false, result, increaseCache))
     {
     case LRU_LOOKUP_NOT_FOUND:
       {
@@ -271,8 +272,9 @@ PVideoFrame __stdcall Prefetcher::GetFrame(int n, IScriptEnvironment* env)
   // Get requested frame
   PVideoFrame result;
   LruCache<size_t, PVideoFrame>::handle cache_handle;
+	bool increaseCache = true;
   // fill result if LRU_LOOKUP_FOUND_AND_READY
-  switch(_pimpl->VideoCache->lookup(n, &cache_handle, true, result))
+  switch(_pimpl->VideoCache->lookup(n, &cache_handle, true, result, increaseCache))
   {
   case LRU_LOOKUP_NOT_FOUND:
     {
