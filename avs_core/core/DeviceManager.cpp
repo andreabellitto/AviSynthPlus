@@ -466,7 +466,8 @@ class QueuePrefetcher
     {
       PVideoFrame result;
       CacheType::handle cacheHandle;
-      switch (videoCache->lookup(n, &cacheHandle, false, result))
+			bool increaseCache = true;
+      switch (videoCache->lookup(n, &cacheHandle, false, result, increaseCache))
       {
         case LRU_LOOKUP_NOT_FOUND:
         {
@@ -547,8 +548,9 @@ public:
     // Get requested frame
     PVideoFrame result;
     CacheType::handle cacheHandle;
+		bool increaseCache = true;
     // fill result if LRU_LOOKUP_FOUND_AND_READY
-    switch (videoCache->lookup(n, &cacheHandle, true, result))
+    switch (videoCache->lookup(n, &cacheHandle, true, result, increaseCache))
     {
       case LRU_LOOKUP_FOUND_AND_READY:
       {
@@ -719,7 +721,8 @@ class CUDAFrameTransferEngine : public FrameTransferEngine
     {
       PVideoFrame result;
       CacheType::handle cacheHandle;
-      switch (videoCache->lookup(n, &cacheHandle, false, result))
+			bool increaseCache = true;
+      switch (videoCache->lookup(n, &cacheHandle, false, result, increaseCache))
       {
         case LRU_LOOKUP_NOT_FOUND:
         {
@@ -865,8 +868,9 @@ public:
     // Get requested frame
     PVideoFrame result;
     CacheType::handle cacheHandle;
+		bool increaseCache = true;
     // fill result if LRU_LOOKUP_FOUND_AND_READY
-    switch (videoCache->lookup(n, &cacheHandle, false, result))
+    switch (videoCache->lookup(n, &cacheHandle, false, result, increaseCache))
     {
       case LRU_LOOKUP_FOUND_AND_READY:
       {
