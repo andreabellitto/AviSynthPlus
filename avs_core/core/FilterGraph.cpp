@@ -44,6 +44,9 @@ protected:
     std::string args;
     std::vector<void*> refNodes;
 
+		int cacheSize;
+		int cacheCapacity;
+
     ClipInfo() { }
     ClipInfo(int number) : number(number) { }
   };
@@ -58,6 +61,8 @@ protected:
         ClipInfo& info = clipMap[node];
         info.name = node->name;
         info.args = DoArray(node, info, node->argnames.data(), node->args);
+				info.cacheSize = node->SetCacheHints(CACHE_GET_SIZE, 0);
+				info.cacheCapacity = node->SetCacheHints(CACHE_GET_CAPACITY, 0);
       }
       OutClip(clipMap[node]);
     }
@@ -179,7 +184,12 @@ protected:
         ss << " [label = \"" << label << "\"];" << std::endl;
       }
       else {
-        ss << " [label = \"" << info.name << "\"];" << std::endl;
+				if (info.cacheCapacity != 0) {
+					ss << " [label = \"" << info.name << "(" << info.cacheSize << " of " << info.cacheCapacity << ")" << "\"];" << std::endl;
+				}
+				else {
+					ss << " [label = \"" << info.name << "\"];" << std::endl;
+				}
       }
     }
     for (void* pclip : info.refNodes) {
@@ -212,6 +222,59 @@ public:
   }
 };
 
+static void DoDumpGraph(PClip clip, int mode, const char* path, IScriptEnvironment* env)
+{
+	FilterGraphNode* root = dynamic_cast<FilterGraphNode*>((IClip*)(void*)clip);
+
+	std::string ret;
+
+	if (mode == 0) {
+		AvsScriptFilterGraph graph;
+		graph.Construct(root);
+		ret = graph.GetOutput();
+	}
+	else if (mode == 1 || mode == 2) {
+		DotFilterGraph graph;
+		graph.Construct(root, mode == 1);
+		ret = graph.GetOutput();
+	}
+	else {
+		env->ThrowError("Unknown mode (%d)", mode);
+	}
+
+	FILE* fp = fopen(path, "w");
+	if (fp == nullptr) {
+		env->ThrowError("Could not open output file ...");
+	}
+	fwrite(ret.data(), ret.size(), 1, fp);
+	fclose(fp);
+}
+
+class DelayedDump : public GenericVideoFilter
+{
+	std::string outpath;
+	int mode;
+	int nframes;
+	bool fired;
+public:
+	DelayedDump(PClip clip, const std::string& outpath, int mode, int nframes)
+		: GenericVideoFilter(clip)
+		, outpath(outpath)
+		, mode(mode)
+		, nframes(nframes)
+		, fired(false)
+	{ }
+
+	PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env)
+	{
+		if (n == nframes && fired == false) {
+			fired = true;
+			DoDumpGraph(child, mode, outpath.c_str(), env);
+		}
+		return child->GetFrame(n, env);
+	}
+};
+
 static AVSValue DumpFilterGraph(AVSValue args, void* user_data, IScriptEnvironment* env) {
   PClip clip = args[0].AsClip();
   FilterGraphNode* root = dynamic_cast<FilterGraphNode*>((IClip*)(void*)clip);
@@ -219,31 +282,15 @@ static AVSValue DumpFilterGraph(AVSValue args, void* user_data, IScriptEnvironme
     env->ThrowError("clip is not a FilterChainNode. Ensure that you enabled the chain analysis by SetChainAnalysis(true).");
   }
 
-  std::string ret;
+	int mode = args[2].AsInt(0);
+	const char* path = args[1].AsString("");
+	int nframes = args[3].AsInt(-1);
 
-  int mode = args[2].AsInt(0);
+	if (nframes >= 0) {
+		return new DelayedDump(clip, path, mode, nframes);
+	}
 
-  if (mode == 0) {
-    AvsScriptFilterGraph graph;
-    graph.Construct(root);
-    ret = graph.GetOutput();
-  }
-  else if (mode == 1 || mode == 2) {
-    DotFilterGraph graph;
-    graph.Construct(root, mode == 1);
-    ret = graph.GetOutput();
-  }
-  else {
-    env->ThrowError("Unknown mode (%d)", mode);
-  }
-
-  const char* path = args[1].AsString("");
-  FILE* fp = fopen(path, "w");
-  if (fp == nullptr) {
-    env->ThrowError("Could not open output file ...");
-  }
-  fwrite(ret.data(), ret.size(), 1, fp);
-  fclose(fp);
+	DoDumpGraph(clip, mode, path, env);
 
   return clip;
 }
@@ -255,6 +302,6 @@ static AVSValue __cdecl SetGraphAnalysis(AVSValue args, void* user_data, IScript
 
 extern const AVSFunction FilterGraph_filters[] = {
   { "SetGraphAnalysis", BUILTIN_FUNC_PREFIX, "b", SetGraphAnalysis, nullptr },
-  { "DumpFilterGraph", BUILTIN_FUNC_PREFIX, "c[outfile]s[mode]i", DumpFilterGraph, nullptr },
+  { "DumpFilterGraph", BUILTIN_FUNC_PREFIX, "c[outfile]s[mode]i[nframes]i", DumpFilterGraph, nullptr },
   { 0 }
 };
