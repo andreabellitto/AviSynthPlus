@@ -58,11 +58,11 @@ struct PrefetcherPimpl
   bool worker_exception_present;
   InternalEnvironment *EnvI;
 
-  PrefetcherPimpl(const PClip& _child, int _nThreads, IScriptEnvironment2 *env2) :
+  PrefetcherPimpl(const PClip& _child, int _nThreads, int _nPrefetchFrames, IScriptEnvironment2 *env2) :
     child(_child),
     vi(_child->GetVideoInfo()),
     nThreads(_nThreads),
-    nPrefetchFrames(_nThreads * 2),
+    nPrefetchFrames(_nPrefetchFrames),
     ThreadPool(NULL),
     LockedPattern(1),
     PatternHits(0),
@@ -123,10 +123,10 @@ AVSValue Prefetcher::ThreadWorker(IScriptEnvironment2* env, void* data)
   return AVSValue();
 }
 
-Prefetcher::Prefetcher(const PClip& _child, int _nThreads, IScriptEnvironment *env) :
+Prefetcher::Prefetcher(const PClip& _child, int _nThreads, int _nPrefetchFrames, IScriptEnvironment *env) :
   _pimpl(NULL)
 {
-  _pimpl = new PrefetcherPimpl(_child, _nThreads, static_cast<IScriptEnvironment2*>(env));
+  _pimpl = new PrefetcherPimpl(_child, _nThreads, _nPrefetchFrames, static_cast<IScriptEnvironment2*>(env));
   _pimpl->VideoCache = std::make_shared<LruCache<size_t, PVideoFrame> >(_pimpl->nPrefetchFrames*2);
 }
 
@@ -348,11 +348,12 @@ AVSValue Prefetcher::Create(AVSValue args, void*, IScriptEnvironment* env)
   InternalEnvironment *envi = static_cast<InternalEnvironment*>(env);
   PClip child = args[0].AsClip();
 
-  int PrefetchThreads = args[1].AsInt((int)envi->GetProperty(AEP_PHYSICAL_CPUS)+1);
+	int PrefetchThreads = args[1].AsInt((int)envi->GetProperty(AEP_PHYSICAL_CPUS) + 1);
+	int PrefetchFrames = args[2].AsInt(PrefetchThreads * 2);
 
   if (PrefetchThreads > 0)
   {
-		return new Prefetcher(child, PrefetchThreads, env);
+		return new Prefetcher(child, PrefetchThreads, PrefetchFrames, env);
   }
   else
     return child;
