@@ -31,6 +31,13 @@ typedef enum _ELogTicketType
     LOGTICKET_W1010 = 1010, // MT-mode specified for script function
 } ELogTicketType;
 
+typedef enum _CacheMode {
+	CACHE_FAST_START,    // start up time and size balanced mode
+	CACHE_OPTIMAL_SIZE,  // slow start up but optimal speed and cache size
+
+	CACHE_DEFAULT = CACHE_FAST_START,
+} CacheMode;
+
 class OneTimeLogTicket
 {
 public:
@@ -71,7 +78,7 @@ public:
     virtual void __stdcall VThrowError(const char* fmt, va_list va) = 0;
     virtual PVideoFrame __stdcall SubframePlanarA(PVideoFrame src, int rel_offset, int new_pitch, int new_row_size, int new_height, int rel_offsetU, int rel_offsetV, int new_pitchUV, int rel_offsetA) = 0;
 
-    virtual void __stdcall SetGraphAnalysis(bool enable) = 0;
+		virtual void __stdcall SetGraphAnalysis(bool enable) = 0;
 
 	  virtual InternalEnvironment* __stdcall GetCoreEnvironment() = 0;
 	  virtual Device* __stdcall GetDevice(int device_type, int device_index) = 0;
@@ -84,6 +91,8 @@ public:
     virtual AVSMap* __stdcall GetAVSMap(PVideoFrame& frame) = 0;
 
 		// Nekopanda: new cache control mechanism
+		virtual void __stdcall SetCacheMode(CacheMode mode) = 0;
+		virtual CacheMode __stdcall GetCacheMode() = 0;
 		bool increaseCache;
 };
 #endif // _AVS_SCRIPTENVIRONMENT_H_INCLUDED

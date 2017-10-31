@@ -127,7 +127,7 @@ Prefetcher::Prefetcher(const PClip& _child, int _nThreads, int _nPrefetchFrames,
   _pimpl(NULL)
 {
   _pimpl = new PrefetcherPimpl(_child, _nThreads, _nPrefetchFrames, static_cast<IScriptEnvironment2*>(env));
-  _pimpl->VideoCache = std::make_shared<LruCache<size_t, PVideoFrame> >(_pimpl->nPrefetchFrames*2);
+  _pimpl->VideoCache = std::make_shared<LruCache<size_t, PVideoFrame> >(_pimpl->nPrefetchFrames*2, CACHE_DEFAULT);
 }
 
 void Prefetcher::Destroy()

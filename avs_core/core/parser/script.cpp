@@ -240,6 +240,7 @@ extern const AVSFunction Script_functions[] = {
   { "Prefetch",         BUILTIN_FUNC_PREFIX, "c[threads]i[frames]i", Prefetcher::Create },
   { "SetLogParams",     BUILTIN_FUNC_PREFIX, "[target]s[level]i", SetLogParams },
   { "LogMsg",              BUILTIN_FUNC_PREFIX, "si", LogMsg },
+	{ "SetCacheMode",     BUILTIN_FUNC_PREFIX, "[mode]i", SetCacheMode },
 
   { "IsY",       BUILTIN_FUNC_PREFIX, "c", IsY },
   { "Is420",     BUILTIN_FUNC_PREFIX, "c", Is420 },
@@ -1384,6 +1385,13 @@ AVSValue LogMsg(AVSValue args, void*, IScriptEnvironment* env)
         envi->LogMsg(args[1].AsInt(), args[0].AsString());
     }
     return AVSValue();
+}
+
+AVSValue SetCacheMode(AVSValue args, void*, IScriptEnvironment* env)
+{
+	InternalEnvironment *env2 = static_cast<InternalEnvironment*>(env);
+	env2->SetCacheMode((CacheMode)args[0].AsInt());
+	return AVSValue();
 }
 
 AVSValue SetDeviceMemoryMax(AVSValue args, void*, IScriptEnvironment* env)

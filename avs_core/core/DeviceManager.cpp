@@ -506,7 +506,7 @@ public:
       numThreads(numThreads),
       threadPool(NULL),
       device(device),
-      videoCache(new CacheType(prefetchFrames*2)),
+      videoCache(new CacheType(prefetchFrames*2, CACHE_DEFAULT)),
       numWorkers(0),
       workerExceptionPresent(false)
   {
@@ -827,7 +827,7 @@ public:
   CUDAFrameTransferEngine(QueuePrefetcher& child, Device* upstreamDevice, Device* downstreamDevice, int prefetchFrames, InternalEnvironment* env) :
     FrameTransferEngine(child, upstreamDevice, downstreamDevice),
     prefetchFrames(prefetchFrames),
-    videoCache(new CacheType(prefetchFrames*2)),
+    videoCache(new CacheType(prefetchFrames*2, CACHE_DEFAULT)),
     stream(nullptr)
   {
     CheckDevicePair(env);

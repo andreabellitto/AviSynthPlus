@@ -79,10 +79,10 @@ struct CachePimpl
   size_t SampleSize;
   size_t MaxSampleCount;
 
-  CachePimpl(const PClip& _child) :
+  CachePimpl(const PClip& _child, CacheMode mode) :
     child(_child),
     vi(_child->GetVideoInfo()),
-    VideoCache(std::make_shared<LruCache<size_t, PVideoFrame> >(0)),
+    VideoCache(std::make_shared<LruCache<size_t, PVideoFrame> >(0, mode)),
     AudioPolicy(CACHE_AUDIO),
     AudioCache(NULL),
     SampleSize(0),
@@ -99,12 +99,12 @@ struct CachePimpl
 };
 
 
-Cache::Cache(const PClip& _child, Device* device, IScriptEnvironment* env) :
+Cache::Cache(const PClip& _child, Device* device, InternalEnvironment* env) :
   Env(env),
   _pimpl(NULL),
   device(device)
 {
-  _pimpl = new CachePimpl(_child);
+  _pimpl = new CachePimpl(_child, env->GetCacheMode());
   env->ManageCache(MC_RegisterCache, reinterpret_cast<void*>(this));
   _RPT5(0, "Cache::Cache registered. cache_id=%p child=%p w=%d h=%d VideoCacheSize=%Iu\n", (void *)this, (void *)_child, _pimpl->vi.width, _pimpl->vi.height, _pimpl->VideoCache->size()); // P.F.
 }
