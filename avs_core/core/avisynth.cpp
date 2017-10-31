@@ -752,6 +752,9 @@ public:
   virtual void* __stdcall GetDeviceStream();
   virtual void __stdcall DeviceAddCallback(void(*cb)(void*), void* user_data);
 
+	virtual void __stdcall SetCacheMode(CacheMode mode);
+	virtual CacheMode __stdcall GetCacheMode();
+
 private:
 
   // Tritical May 2005
@@ -849,6 +852,8 @@ private:
 
   // filter graph
   bool graphAnalysisEnable;
+
+	CacheMode cacheMode;
 
   void InitMT();
 };
@@ -958,7 +963,10 @@ ScriptEnvironment::ScriptEnvironment()
     global_var_table->Set("LOG_DEBUG",   (int)LOGLEVEL_DEBUG);
 
     global_var_table->Set("DEV_TYPE_CPU", (int)DEV_TYPE_CPU);
-    global_var_table->Set("DEV_TYPE_CUDA", (int)DEV_TYPE_CUDA);
+		global_var_table->Set("DEV_TYPE_CUDA", (int)DEV_TYPE_CUDA);
+
+		global_var_table->Set("CACHE_FAST_START", (int)CACHE_FAST_START);
+		global_var_table->Set("CACHE_OPTIMAL_SIZE", (int)CACHE_OPTIMAL_SIZE);
 
     InitMT();
     thread_pool = new ThreadPool(std::thread::hardware_concurrency(), 1);
@@ -3160,6 +3168,16 @@ void ScriptEnvironment::DeviceAddCallback(void(*cb)(void*), void* user_data)
 void ScriptEnvironment::SetGraphAnalysis(bool enable)
 {
   graphAnalysisEnable = enable;
+}
+
+void ScriptEnvironment::SetCacheMode(CacheMode mode)
+{
+	cacheMode = mode;
+}
+
+CacheMode ScriptEnvironment::GetCacheMode()
+{
+	return cacheMode;
 }
 
 extern void ApplyMessage(PVideoFrame* frame, const VideoInfo& vi,

@@ -498,6 +498,16 @@ public:
   {
     return core->GetAVSMap(frame);
   }
+
+	virtual void __stdcall SetCacheMode(CacheMode mode)
+	{
+		core->SetCacheMode(mode);
+	}
+
+	virtual CacheMode __stdcall GetCacheMode()
+	{
+		return core->GetCacheMode();
+	}
 };
 
 #undef CHECK_THREAD

@@ -43,6 +43,7 @@
 #endif
 
 struct CachePimpl;
+class InternalEnvironment;
 
 class Cache : public IClip
 {
@@ -57,7 +58,7 @@ public:
 #ifdef _DEBUG  
   std::string FuncName = ""; // P.F. Invoked function's name whose queue owns the cache object
 #endif
-  Cache(const PClip& child, Device* device, IScriptEnvironment* env);
+  Cache(const PClip& child, Device* device, InternalEnvironment* env);
   ~Cache();
   PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env);
   void __stdcall GetAudio(void* buf, __int64 start, __int64 count, IScriptEnvironment* env);

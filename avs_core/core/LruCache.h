@@ -7,6 +7,7 @@
 #include <cassert>
 #include "ObjectPool.h"
 #include "SimpleLruCache.h"
+#include "InternalEnvironment.h"
 
 enum LruLookupResult
 {
@@ -79,6 +80,7 @@ private:
 
   typedef size_t  size_type;
 
+	CacheMode mode;
   CacheType MainCache;
   GhostCacheType Ghosts;
   ObjectPool<entry_type> EntryPool;
@@ -111,8 +113,9 @@ public:
 
   typedef std::pair<entry_ptr, std::shared_ptr<LruCache> > handle;
 
-  LruCache(size_type capacity) :
+  LruCache(size_type capacity, CacheMode mode) :
     GHOSTS_MIN_CAPACITY(50),
+		mode(mode),
     MainCache(capacity, &MainEvictEvent, reinterpret_cast<void*>(this)),
     Ghosts(GHOSTS_MIN_CAPACITY, typename GhostCacheType::EvictEventType(), reinterpret_cast<void*>(this))
   {
@@ -205,7 +208,9 @@ public:
 				// Nekopnada: reduce amount of cache.
 				// when this filter increased the cache, we prevent lower filters increase their cache 
 				// because the requests to the lower filters were not needed if this filter cached the frame.
-				increaseCache = false;
+				if (mode == CACHE_OPTIMAL_SIZE) {
+					increaseCache = false;
+				}
       }
       else
       {
