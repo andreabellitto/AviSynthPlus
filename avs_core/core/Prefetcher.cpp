@@ -135,8 +135,8 @@ void Prefetcher::Destroy()
   if (_pimpl)
   {
     PrefetcherPimpl *pimpl = _pimpl;
-    _pimpl = nullptr;
     delete pimpl;
+		_pimpl = nullptr;
   }
 }
 
