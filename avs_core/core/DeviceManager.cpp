@@ -355,9 +355,10 @@ DeviceManager::DeviceManager(InternalEnvironment* env) :
 
 #ifdef ENABLE_CUDA
   int cuda_device_count = 0;
-  CUDA_CHECK(cudaGetDeviceCount(&cuda_device_count));
-  for (int i = 0; i < cuda_device_count; ++i) {
-    cudaDevices.emplace_back(new CUDADevice(next_device_id++, i, env));
+  if (cudaGetDeviceCount(&cuda_device_count) == cudaSuccess) {
+    for (int i = 0; i < cuda_device_count; ++i) {
+      cudaDevices.emplace_back(new CUDADevice(next_device_id++, i, env));
+    }
   }
   // do not modify CUDADevices after this since it causes pointer change
 
@@ -384,6 +385,9 @@ Device* DeviceManager::GetDevice(int device_type, int device_index)
   case DEV_TYPE_CUDA:
     if (device_index < 0) {
       env->ThrowError("Invalid device index %d", device_index);
+    }
+    if (cudaDevices.size() == 0) {
+      env->ThrowError("No CUDA devices ...");
     }
     // wrap index
     device_index %= (int)cudaDevices.size();
