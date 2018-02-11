@@ -81,6 +81,7 @@ public:
 		virtual void __stdcall SetGraphAnalysis(bool enable) = 0;
 
 	  virtual InternalEnvironment* __stdcall GetCoreEnvironment() = 0;
+		virtual ThreadPool* __stdcall GetThreadPool() = 0;
 	  virtual Device* __stdcall GetDevice(int device_type, int device_index) = 0;
     virtual Device* __stdcall GetCurrentDevice() = 0;
     virtual Device* __stdcall SetCurrentDevice(Device* device) = 0;

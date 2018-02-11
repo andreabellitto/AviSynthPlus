@@ -411,7 +411,7 @@ public:
 
   virtual void __stdcall ParallelJob(ThreadWorkerFuncPtr jobFunc, void* jobData, IJobCompletion* completion)
   {
-    core->ParallelJob(jobFunc, jobData, completion);
+		core->GetThreadPool()->QueueJob(jobFunc, jobData, this, static_cast<JobCompletion*>(completion));
   }
 
   virtual ClipDataStore* __stdcall ClipData(IClip *clip)
@@ -463,6 +463,11 @@ public:
   {
 	  return core->GetCoreEnvironment();
   }
+
+	virtual ThreadPool* __stdcall GetThreadPool()
+	{
+		return core->GetThreadPool();
+	}
 
   virtual int __stdcall SetDeviceMemoryMax(AvsDeviceType type, int index, int mem)
   {

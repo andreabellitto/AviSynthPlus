@@ -353,7 +353,7 @@ AVSValue Prefetcher::Create(AVSValue args, void*, IScriptEnvironment* env)
 	int PrefetchThreads = args[1].AsInt((int)envi->GetProperty(AEP_PHYSICAL_CPUS) + 1);
 	int PrefetchFrames = args[2].AsInt(PrefetchThreads * 2);
 
-  if (PrefetchThreads > 0)
+  if (PrefetchThreads > 0 && PrefetchFrames > 0)
   {
 		return new Prefetcher(child, PrefetchThreads, PrefetchFrames, env);
   }

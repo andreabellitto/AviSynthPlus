@@ -715,6 +715,7 @@ public:
   virtual void __stdcall SetGraphAnalysis(bool enable);
 
   virtual InternalEnvironment* __stdcall GetCoreEnvironment();
+	virtual ThreadPool* __stdcall GetThreadPool();
   virtual int __stdcall SetDeviceMemoryMax(AvsDeviceType type, int index, int mem);
   virtual Device* __stdcall GetDevice(int device_type, int device_index);
   virtual Device* __stdcall GetCurrentDevice();
@@ -3038,6 +3039,11 @@ PVideoFrame ScriptEnvironment::SubframePlanarA(PVideoFrame src, int rel_offset, 
 InternalEnvironment* ScriptEnvironment::GetCoreEnvironment()
 {
 	return this;
+}
+
+ThreadPool* ScriptEnvironment::GetThreadPool()
+{
+	return thread_pool;
 }
 
 int ScriptEnvironment::SetDeviceMemoryMax(AvsDeviceType type, int index, int mem)
