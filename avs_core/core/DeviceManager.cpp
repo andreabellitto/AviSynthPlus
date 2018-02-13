@@ -836,6 +836,8 @@ public:
   {
     CheckDevicePair(env);
 
+    // note: stream belongs to a device
+    upstreamDevice->SetActiveToCurrentThread(env);
     CUDA_CHECK(cudaStreamCreate(&stream));
   }
 
