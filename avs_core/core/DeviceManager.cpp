@@ -520,7 +520,6 @@ public:
   ~QueuePrefetcher()
   {
     // finish threadpool
-    threadPool->Cancel();
     threadPool->Finish();
 
     // cancel queue

@@ -86,13 +86,11 @@ private:
   std::mutex m_mutex;
   std::condition_variable m_not_empty;
   std::condition_variable m_not_full;
-  int m_waiting;
 	bool finished;
 
 public:
   mpmc_bounded_queue(size_type capacity) :
     m_container(capacity),
-    m_waiting(0),
 		finished(false)
   {
   }
@@ -117,14 +115,6 @@ public:
     std::unique_lock<std::mutex> lock(m_mutex);
 		return finished;
 	}
-
-  void status(bool& finished, bool& empty, int& waiting)
-  {
-    std::unique_lock<std::mutex> lock(m_mutex);
-    finished = this->finished;
-    empty = m_container.empty();
-    waiting = m_waiting;
-  }
 
   bool push_front(T const& item)
   {
@@ -153,9 +143,7 @@ public:
     }
     while(m_container.empty())
     {
-      ++m_waiting;
       m_not_empty.wait(lock);
-      --m_waiting;
       if (finished) {
         return false;
       }
@@ -165,4 +153,12 @@ public:
     m_not_full.notify_one();
     return true;
   }
+
+	bool pop_remain(value_type* pItem)
+	{
+		assert(finished);
+		if (m_container.empty()) return false;
+		m_container.pop_back(pItem);
+		return true;
+	}
 };
