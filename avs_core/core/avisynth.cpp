@@ -1028,24 +1028,10 @@ ScriptEnvironment::~ScriptEnvironment() {
   // This circular reference causes leaks, so we call
   // Destroy() on the prefetcher, which will in turn terminate all
   // its TLS stuff and break the chain.
-  while (true) {
-    // wait for completion
-    bool isRunning = false;
-    for (auto& pool : ThreadPoolRegistry) {
-      isRunning |= pool->IsRunning();
-      if (isRunning) break;
-    }
-    if (isRunning) {
-      Sleep(10);
-      continue;
-    }
-    // wait for thread termination
-    for (auto& pool : ThreadPoolRegistry) {
-      pool->Finish();
-    }
-    ThreadPoolRegistry.clear();
-    break;
+  for (auto& pool : ThreadPoolRegistry) {
+    pool->Join();
   }
+  ThreadPoolRegistry.clear();
 
   // delete avsmap
   for (FrameRegistryType2::iterator it = FrameRegistry2.begin(), end_it = FrameRegistry2.end();

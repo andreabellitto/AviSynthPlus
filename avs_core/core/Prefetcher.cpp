@@ -80,7 +80,10 @@ struct PrefetcherPimpl
 
   ~PrefetcherPimpl()
   {
-    ThreadPool->Finish();
+		for (void* data : ThreadPool->Finish()) {
+			PrefetcherJobParams *ptr = (PrefetcherJobParams*)data;
+			VideoCache->rollback(&ptr->cache_handle);
+		}
   }
 };
 

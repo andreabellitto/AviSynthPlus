@@ -85,6 +85,7 @@ class ThreadPool
 private:
   ThreadPoolPimpl * const _pimpl;
 
+	static void ThreadFunc(size_t thread_id, ThreadPoolPimpl * const _pimpl);
 public:
   ThreadPool(size_t nThreads, size_t nStartId);
   ~ThreadPool();
@@ -92,9 +93,8 @@ public:
   void QueueJob(ThreadWorkerFuncPtr clb, void* params, InternalEnvironment *env, JobCompletion *tc);
   size_t NumThreads() const;
 
-  bool IsRunning();
-  void Cancel();
-	void Finish();
+	std::vector<void*> Finish();
+	void Join();
 };
 
 #endif  // _AVS_THREADPOOL_H
