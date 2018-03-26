@@ -8,7 +8,7 @@ struct ThreadPoolGenericItemData
 {
   ThreadWorkerFuncPtr Func;
   void* Params;
-  InternalEnvironment* Environment;
+	PInternalEnvironment Environment;
   AVSPromise* Promise;
   Device* Device;
 };
@@ -33,9 +33,10 @@ public:
 
 __declspec(thread) size_t g_thread_id;
 
-void ThreadPool::ThreadFunc(size_t thread_id, ThreadPoolPimpl * const _pimpl)
+void ThreadPool::ThreadFunc(size_t thread_id, ThreadPoolPimpl * const _pimpl, InternalEnvironment* env)
 {
-	ScriptEnvironmentTLS EnvTLS(thread_id);
+	auto EnvTLS = new ScriptEnvironmentTLS(thread_id, env);
+	PInternalEnvironment holder = PInternalEnvironment(EnvTLS);
 	g_thread_id = thread_id;
 
 	while (true)
@@ -50,13 +51,13 @@ void ThreadPool::ThreadFunc(size_t thread_id, ThreadPoolPimpl * const _pimpl)
 			return;
 		}
 
-		EnvTLS.Specialize(data.Environment, data.Device);
-		EnvTLS.increaseCache = true;
+		EnvTLS->Specialize(data.Environment.get(), data.Device);
+		EnvTLS->increaseCache = true;
 		if (data.Promise != NULL)
 		{
 			try
 			{
-				data.Promise->set_value(data.Func(&EnvTLS, data.Params));
+				data.Promise->set_value(data.Func(EnvTLS, data.Params));
 			}
 			catch (const AvisynthError&)
 			{
@@ -76,14 +77,14 @@ void ThreadPool::ThreadFunc(size_t thread_id, ThreadPoolPimpl * const _pimpl)
 		{
 			try
 			{
-				data.Func(&EnvTLS, data.Params);
+				data.Func(EnvTLS, data.Params);
 			}
 			catch (...) {}
 		}
 	} //while
 }
 
-ThreadPool::ThreadPool(size_t nThreads, size_t nStartId) :
+ThreadPool::ThreadPool(size_t nThreads, size_t nStartId, InternalEnvironment* env) :
   _pimpl(new ThreadPoolPimpl(nThreads))
 {
   _pimpl->Threads.reserve(nThreads);
@@ -93,7 +94,7 @@ ThreadPool::ThreadPool(size_t nThreads, size_t nStartId) :
 	// i is used as the thread id. Skip id zero because that is reserved for the main thread.
 	// CUDA: thread id is controled by caller
   for (size_t i = 0; i < nThreads; ++i)
-    _pimpl->Threads.emplace_back(ThreadFunc, i + nStartId, _pimpl);
+    _pimpl->Threads.emplace_back(ThreadFunc, i + nStartId, _pimpl, env);
 
 	_pimpl->NumRunning = nThreads;
 }
@@ -103,15 +104,17 @@ void ThreadPool::QueueJob(ThreadWorkerFuncPtr clb, void* params, InternalEnviron
   ThreadPoolGenericItemData itemData;
   itemData.Func = clb;
   itemData.Params = params;
-  itemData.Environment = env;
   itemData.Device = env->GetCurrentDevice();
+
+	env->AddRef();
+	itemData.Environment = PInternalEnvironment(env);
 
   if (tc != NULL)
     itemData.Promise = tc->Add();
   else
     itemData.Promise = NULL;
 
-  if (_pimpl->MsgQueue.push_front(itemData) == false) {
+  if (_pimpl->MsgQueue.push_front(std::move(itemData)) == false) {
     throw AvisynthError("Threadpool is canceled");
   }
 }
@@ -123,6 +126,7 @@ size_t ThreadPool::NumThreads() const
 
 std::vector<void*> ThreadPool::Finish()
 {
+	std::vector<PInternalEnvironment> envs; // !!declaration order is important!!
 	std::unique_lock<std::mutex> lock(_pimpl->Mutex);
 	if (_pimpl->NumRunning > 0) {
 		_pimpl->MsgQueue.finish();
@@ -134,6 +138,10 @@ std::vector<void*> ThreadPool::Finish()
 		ThreadPoolGenericItemData item;
 		while (_pimpl->MsgQueue.pop_remain(&item)) {
 			ret.push_back(item.Params);
+
+			// store references and release outside the lock
+			// to avoid locking recursively
+			envs.emplace_back(std::move(item.Environment));
 		}
 		return ret;
 	}

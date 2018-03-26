@@ -729,6 +729,11 @@ public:
 	virtual bool __stdcall InvokeThread(AVSValue* result, const char* name, const AVSValue& args,
 			const char* const* arg_names, IScriptEnvironment2* env);
 
+	virtual void __stdcall AddRef() { };
+	virtual void __stdcall Release() { };
+	virtual void __stdcall IncEnvCount() { InterlockedIncrement(&EnvCount); }
+	virtual void __stdcall DecEnvCount() { InterlockedDecrement(&EnvCount); }
+
 	virtual void __stdcall SetCacheMode(CacheMode mode);
 	virtual CacheMode __stdcall GetCacheMode();
 
@@ -755,6 +760,7 @@ private:
   Device* currentDevice;
 
   int ImportDepth;
+	long EnvCount; // for ScriptEnvironmentTLS leak detection
 
   const AVSFunction* Lookup(const char* search_name, const AVSValue* args, size_t num_args,
                       bool &pstrict, size_t args_names_count, const char* const* arg_names);
@@ -883,6 +889,7 @@ ScriptEnvironment::ScriptEnvironment()
     closing(false),
     thread_pool(NULL),
     ImportDepth(0),
+	  EnvCount(0),
     DeviceManager(this),
     FrontCache(NULL),
     graphAnalysisEnable(false),
@@ -947,7 +954,7 @@ ScriptEnvironment::ScriptEnvironment()
 		global_var_table->Set("CACHE_OPTIMAL_SIZE", (int)CACHE_OPTIMAL_SIZE);
 
     InitMT();
-    thread_pool = new ThreadPool(std::thread::hardware_concurrency(), 1);
+    thread_pool = new ThreadPool(std::thread::hardware_concurrency(), 1, this);
 
     ExportBuiltinFilters();
 
@@ -1009,6 +1016,11 @@ ScriptEnvironment::~ScriptEnvironment() {
     pool->Join();
   }
   ThreadPoolRegistry.clear();
+
+	// check ScriptEnvironmentTLS leaks
+	if (EnvCount > 0) {
+		LogMsg(LOGLEVEL_WARNING, "ScriptEnvironmentTLS leaks.");
+	}
 
   // delete avsmap
   for (FrameRegistryType2::iterator it = FrameRegistry2.begin(), end_it = FrameRegistry2.end();
@@ -3222,7 +3234,7 @@ void ScriptEnvironment::CopyFrameProps(PVideoFrame src, PVideoFrame dst)
 
 ThreadPool* ScriptEnvironment::NewThreadPool(size_t nThreads)
 {
-	ThreadPool* pool = new ThreadPool(nThreads, nTotalThreads);
+	ThreadPool* pool = new ThreadPool(nThreads, nTotalThreads, this);
 	ThreadPoolRegistry.emplace_back(pool);
 
 	nTotalThreads += nThreads;

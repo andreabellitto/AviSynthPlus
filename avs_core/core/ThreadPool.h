@@ -85,9 +85,9 @@ class ThreadPool
 private:
   ThreadPoolPimpl * const _pimpl;
 
-	static void ThreadFunc(size_t thread_id, ThreadPoolPimpl * const _pimpl);
+	static void ThreadFunc(size_t thread_id, ThreadPoolPimpl * const _pimpl, InternalEnvironment* env);
 public:
-  ThreadPool(size_t nThreads, size_t nStartId);
+  ThreadPool(size_t nThreads, size_t nStartId, InternalEnvironment* env);
   ~ThreadPool();
 
   void QueueJob(ThreadWorkerFuncPtr clb, void* params, InternalEnvironment *env, JobCompletion *tc);
