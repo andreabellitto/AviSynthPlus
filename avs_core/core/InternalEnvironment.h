@@ -4,6 +4,7 @@
 #include <avisynth.h>
 #include <algorithm>
 #include <string>
+#include <memory>
 
 class ClipDataStore;
 
@@ -61,9 +62,9 @@ extern __declspec(thread) int g_getframe_recursive_count;
 // Neither host applications nor plugins should use
 // these interfaces.
 class InternalEnvironment : public IScriptEnvironment2 {
+protected:
+	virtual ~InternalEnvironment() {}
 public:
-    virtual ~InternalEnvironment() {}
-
     virtual int __stdcall IncrImportDepth() = 0;
     virtual int __stdcall DecrImportDepth() = 0;
     virtual void __stdcall AdjustMemoryConsumption(size_t amount, bool minus) = 0;
@@ -94,9 +95,23 @@ public:
 		virtual bool __stdcall InvokeThread(AVSValue* result, const char* name, const AVSValue& args,
 			const char* const* arg_names, IScriptEnvironment2* env) = 0;
 
+		// Nekopanda: support multiple prefetcher
+		virtual void __stdcall AddRef() = 0;
+		virtual void __stdcall Release() = 0;
+		virtual void __stdcall IncEnvCount() = 0;
+		virtual void __stdcall DecEnvCount() = 0;
+
 		// Nekopanda: new cache control mechanism
 		virtual void __stdcall SetCacheMode(CacheMode mode) = 0;
 		virtual CacheMode __stdcall GetCacheMode() = 0;
 		bool increaseCache;
 };
+
+struct InternalEnvironmentDeleter {
+	void operator()(InternalEnvironment* ptr) const {
+		ptr->Release();
+	}
+};
+typedef std::unique_ptr<InternalEnvironment, InternalEnvironmentDeleter> PInternalEnvironment;
+
 #endif // _AVS_SCRIPTENVIRONMENT_H_INCLUDED

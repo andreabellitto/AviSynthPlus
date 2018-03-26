@@ -2,6 +2,7 @@
 #define _SCRIPTENVIRONMENTTLS_H
 
 #include <avisynth.h>
+#include <avs/win.h>
 #include <cstdarg>
 #include "vartable.h"
 #include "ThreadPool.h"
@@ -17,6 +18,7 @@ extern __declspec(thread) size_t g_thread_id;
 class ScriptEnvironmentTLS : public InternalEnvironment
 {
 private:
+	InternalEnvironment *env_; // for leak detection
   InternalEnvironment *core;
   const size_t thread_id;
   VarTable* global_var_table;
@@ -25,27 +27,34 @@ private:
   VarTable* var_table;
   BufferPool BufferPool;
   Device* currentDevice;
+	volatile long refcount;
+
+	~ScriptEnvironmentTLS()
+	{
+		while (var_table)
+			PopContext();
+
+		while (global_var_table)
+			PopContextGlobal();
+
+		env_->DecEnvCount(); // for leak detection
+	}
 
 public:
-  ScriptEnvironmentTLS(size_t _thread_id) :
+  ScriptEnvironmentTLS(size_t _thread_id, InternalEnvironment* env) :
+		env_(env),
     core(NULL),
     thread_id(_thread_id),
     global_var_table(NULL),
     var_table(NULL),
     BufferPool(this),
-	currentDevice(NULL)
+		currentDevice(NULL),
+		refcount(1)
   {
     global_var_table = new VarTable(0, 0);
     var_table = new VarTable(0, global_var_table);
-  }
 
-  ~ScriptEnvironmentTLS()
-  {
-    while (var_table)
-      PopContext();
-
-    while (global_var_table)
-      PopContextGlobal();
+		env_->IncEnvCount(); // for leak detection
   }
 
   void Specialize(InternalEnvironment* _core, Device* _device)
@@ -512,6 +521,24 @@ public:
 		const char* const* arg_names, IScriptEnvironment2* env)
 	{
 		return core->InvokeThread(result, name, args, arg_names, env);
+	}
+
+	virtual void __stdcall AddRef() {
+		InterlockedIncrement(&refcount);
+	}
+
+	virtual void __stdcall Release() {
+		if (InterlockedDecrement(&refcount) == 0) {
+			delete this;
+		}
+	}
+
+	virtual void __stdcall IncEnvCount() {
+		core->IncEnvCount();
+	}
+	
+	virtual void __stdcall DecEnvCount() {
+		core->DecEnvCount();
 	}
 
 	virtual void __stdcall SetCacheMode(CacheMode mode)

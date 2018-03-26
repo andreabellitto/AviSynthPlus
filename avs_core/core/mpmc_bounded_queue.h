@@ -37,12 +37,12 @@ public:
     return size == max_size;
   }
 
-  bool push_front(const T& item)
+  bool push_front(T&& item)
   {
     if (full())
       return false;
 
-    array[head] = item;
+    array[head] = std::move(item);
     head = (head + 1) % max_size;
     ++size;
 
@@ -116,7 +116,7 @@ public:
 		return finished;
 	}
 
-  bool push_front(T const& item)
+  bool push_front(T&& item)
   {
     std::unique_lock<std::mutex> lock(m_mutex);
 		if (finished) {
@@ -129,7 +129,7 @@ public:
         return false;
       }
     }
-    m_container.push_front(item);
+    m_container.push_front(std::move(item));
     lock.unlock();
     m_not_empty.notify_one();
     return true;
