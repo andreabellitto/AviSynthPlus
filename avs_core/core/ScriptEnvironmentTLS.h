@@ -268,7 +268,11 @@ public:
 
   AVSValue __stdcall Invoke(const char* name, const AVSValue args, const char* const* arg_names=0)
   {
-    return core->Invoke(name, args, arg_names);
+		AVSValue result;
+		if (!core->InvokeThread(&result, name, args, arg_names, this)) {
+			throw NotFound();
+		}
+		return result;
   }
 
   bool __stdcall MakeWritable(PVideoFrame* pvf)
@@ -369,7 +373,7 @@ public:
 
   virtual bool __stdcall Invoke(AVSValue *result, const char* name, const AVSValue& args, const char* const* arg_names=0)
   {
-    return core->Invoke(result, name, args, arg_names=0);
+    return core->InvokeThread(result, name, args, arg_names, this);
   }
 
   size_t  __stdcall GetProperty(AvsEnvProperty prop)
@@ -503,6 +507,12 @@ public:
   {
     return core->GetAVSMap(frame);
   }
+
+	virtual bool __stdcall InvokeThread(AVSValue* result, const char* name, const AVSValue& args,
+		const char* const* arg_names, IScriptEnvironment2* env)
+	{
+		return core->InvokeThread(result, name, args, arg_names, env);
+	}
 
 	virtual void __stdcall SetCacheMode(CacheMode mode)
 	{

@@ -726,6 +726,8 @@ public:
   virtual AVSMap* __stdcall GetAVSMap(PVideoFrame& frame);
   virtual void* __stdcall GetDeviceStream();
   virtual void __stdcall DeviceAddCallback(void(*cb)(void*), void* user_data);
+	virtual bool __stdcall InvokeThread(AVSValue* result, const char* name, const AVSValue& args,
+			const char* const* arg_names, IScriptEnvironment2* env);
 
 	virtual void __stdcall SetCacheMode(CacheMode mode);
 	virtual CacheMode __stdcall GetCacheMode();
@@ -745,6 +747,7 @@ private:
   ThreadPool * thread_pool;
 
   PluginManager *plugin_manager;
+	std::recursive_mutex plugin_mutex;
 
   VarTable* global_var_table;
   VarTable* var_table;
@@ -1249,7 +1252,11 @@ void __stdcall ScriptEnvironment::SetFilterMTMode(const char* filter, MtMode mod
   }
 
   std::string name_to_register;
-  std::string loading = plugin_manager->PluginLoading();
+	std::string loading;
+	{
+		std::unique_lock<std::recursive_mutex> env_lock(plugin_mutex);
+		loading = plugin_manager->PluginLoading();
+	}
   if (loading.empty())
     name_to_register = filter;
   else
@@ -1396,22 +1403,27 @@ bool __stdcall ScriptEnvironment::LoadPlugin(const char* filePath, bool throwOnE
   // Autoload needed to ensure that manual LoadPlugin() calls always override autoloaded plugins.
   // For that, autoloading must happen before any LoadPlugin(), so we force an
   // autoload operation before any LoadPlugin().
+	std::unique_lock<std::recursive_mutex> env_lock(plugin_mutex);
+
   this->AutoloadPlugins();
   return plugin_manager->LoadPlugin(filePath, throwOnError, result);
 }
 
 void __stdcall ScriptEnvironment::AddAutoloadDir(const char* dirPath, bool toFront)
 {
+	std::unique_lock<std::recursive_mutex> env_lock(plugin_mutex);
   plugin_manager->AddAutoloadDir(dirPath, toFront);
 }
 
 void __stdcall ScriptEnvironment::ClearAutoloadDirs()
 {
+	std::unique_lock<std::recursive_mutex> env_lock(plugin_mutex);
   plugin_manager->ClearAutoloadDirs();
 }
 
 void __stdcall ScriptEnvironment::AutoloadPlugins()
 {
+	std::unique_lock<std::recursive_mutex> env_lock(plugin_mutex);
   plugin_manager->AutoloadPlugins();
 }
 
@@ -1440,6 +1452,7 @@ void ScriptEnvironment::AddFunction(const char* name, const char* params, ApplyF
 }
 
 void ScriptEnvironment::AddFunction(const char* name, const char* params, ApplyFunc apply, void* user_data, const char *exportVar) {
+	std::unique_lock<std::recursive_mutex> env_lock(plugin_mutex);
   plugin_manager->AddFunction(name, params, apply, user_data, exportVar);
 }
 
@@ -2497,6 +2510,8 @@ static size_t Flatten(const AVSValue& src, AVSValue* dst, size_t index, int leve
 const AVSFunction* ScriptEnvironment::Lookup(const char* search_name, const AVSValue* args, size_t num_args,
                     bool &pstrict, size_t args_names_count, const char* const* arg_names)
 {
+	std::unique_lock<std::recursive_mutex> env_lock(plugin_mutex);
+
   const AVSFunction *result = NULL;
 
   size_t oanc;
@@ -2538,8 +2553,8 @@ const AVSFunction* ScriptEnvironment::Lookup(const char* search_name, const AVSV
 
 AVSValue ScriptEnvironment::Invoke(const char* name, const AVSValue args, const char* const* arg_names)
 {
-  AVSValue result;
-  if (!Invoke(&result, name, args, arg_names))
+	AVSValue result;
+	if (!Invoke(&result, name, args, arg_names))
   {
     throw NotFound();
   }
@@ -2559,8 +2574,130 @@ AVSValue ScriptEnvironment::Invoke(const char* name, const AVSValue args, const 
   return result;
 }
 
+bool __stdcall ScriptEnvironment::InvokeThread(AVSValue* result, const char* name, const AVSValue& args, const char* const* arg_names, IScriptEnvironment2* env)
+{
+	const int args_names_count = (arg_names && args.IsArray()) ? args.ArraySize() : 0;
+
+	// get how many args we will need to store
+	size_t args2_count = Flatten(args, NULL, 0, 0, arg_names);
+	if (args2_count > ScriptParser::max_args)
+		ThrowError("Too many arguments passed to function (max. is %d)", ScriptParser::max_args);
+
+	// flatten unnamed args
+	std::vector<AVSValue> args2(args2_count, AVSValue());
+	Flatten(args, args2.data(), 0, 0, arg_names);
+
+	// find matching function
+	bool strict = false;
+	const AVSFunction *f = this->Lookup(name, args2.data(), args2_count, strict, args_names_count, arg_names);
+	if (!f) {
+		return false;
+	}
+
+	// combine unnamed args into arrays
+	size_t src_index = 0, dst_index = 0;
+	const char* p = f->param_types;
+	const size_t maxarg3 = max(args2_count, strlen(p)); // well it can't be any longer than this.
+
+	std::vector<AVSValue> args3(maxarg3, AVSValue());
+
+	while (*p) {
+		if (*p == '[') {
+			p = strchr(p + 1, ']');
+			if (!p) break;
+			p++;
+		}
+		else if ((p[1] == '*') || (p[1] == '+')) {
+			size_t start = src_index;
+			while ((src_index < args2_count) && (AVSFunction::SingleTypeMatch(*p, args2[src_index], strict)))
+				src_index++;
+			size_t size = src_index - start;
+			assert(args2_count >= size);
+
+			// Even if the AVSValue below is an array of zero size, we can't skip adding it to args3,
+			// because filters like BlankClip might still be expecting it.
+			args3[dst_index++] = AVSValue(size > 0 ? args2.data() + start : NULL, (int)size); // can't delete args2 early because of this
+
+			p += 2;
+		}
+		else {
+			if (src_index < args2_count)
+				args3[dst_index] = args2[src_index];
+			src_index++;
+			dst_index++;
+			p++;
+		}
+	}
+	if (src_index < args2_count)
+		ThrowError("Too many arguments to function %s", name);
+
+	const int args3_count = (int)dst_index;
+
+	// copy named args
+	for (int i = 0; i<args_names_count; ++i) {
+		if (arg_names[i]) {
+			size_t named_arg_index = 0;
+			for (const char* p = f->param_types; *p; ++p) {
+				if (*p == '*' || *p == '+') {
+					continue;   // without incrementing named_arg_index
+				}
+				else if (*p == '[') {
+					p += 1;
+					const char* q = strchr(p, ']');
+					if (!q) break;
+					if (strlen(arg_names[i]) == size_t(q - p) && !_strnicmp(arg_names[i], p, q - p)) {
+						// we have a match
+						if (args3[named_arg_index].Defined()) {
+							// so named args give can't have .+ specifier
+							ThrowError("Script error: the named argument \"%s\" was passed more than once to %s", arg_names[i], name);
+						}
+#ifndef NEW_AVSVALUE
+						//PF 161028 AVS+ arrays as named arguments
+						else if (args[i].IsArray()) {
+							ThrowError("Script error: can't pass an array as a named argument");
+						}
+#endif
+						else if (args[i].Defined() && !AVSFunction::SingleTypeMatch(q[1], args[i], false)) {
+							ThrowError("Script error: the named argument \"%s\" to %s had the wrong type", arg_names[i], name);
+						}
+						else {
+							args3[named_arg_index] = args[i];
+							goto success;
+						}
+					}
+					else {
+						p = q + 1;
+					}
+				}
+				named_arg_index++;
+			}
+			// failure
+			ThrowError("Script error: %s does not have a named argument \"%s\"", name, arg_names[i]);
+		success:;
+		}
+	}
+
+	// Trim array size to the actual number of arguments
+	args3.resize(args3_count);
+	std::vector<AVSValue>(args3).swap(args3);
+
+	AVSValue funcArgs(args3.data(), (int)args3.size());
+	*result = f->apply(funcArgs, f->user_data, env);
+
+	return true;
+}
+
 bool __stdcall ScriptEnvironment::Invoke(AVSValue *result, const char* name, const AVSValue& args, const char* const* arg_names)
 {
+	if (g_thread_id != 0) {
+		ThrowError("Invalid ScriptEnvironment. You are using different thread's environment.");
+	}
+
+	if (g_getframe_recursive_count != 0) {
+		// Invoked from GetFrame/GetAudio, skip all cache and mt mecanism
+		return InvokeThread(result, name, args, arg_names, this);
+	}
+	
 #ifdef DEBUG_GSCRIPTCLIP_MT
   _RPT3(0, "ScriptEnvironment::Invoke %s try memory lock %p thread %d\n", name, (void *)&memory_mutex, GetCurrentThreadId());
   std::unique_lock<std::recursive_mutex> env_lock(memory_mutex);
@@ -2932,6 +3069,8 @@ success:;
 
 bool ScriptEnvironment::FunctionExists(const char* name)
 {
+	std::unique_lock<std::recursive_mutex> env_lock(plugin_mutex);
+
   // Look among internal functions
   if (InternalFunctionExists(name))
     return true;
