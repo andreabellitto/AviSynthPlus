@@ -55,6 +55,7 @@ class Device;
 class ThreadPool;
 
 extern __declspec(thread) size_t g_thread_id;
+extern __declspec(thread) int g_getframe_recursive_count;
 
 // Strictly for Avisynth core only.
 // Neither host applications nor plugins should use
@@ -90,6 +91,8 @@ public:
 	  virtual PVideoFrame __stdcall GetOnDeviceFrame(PVideoFrame& src, Device* device) = 0;
 		virtual ThreadPool* __stdcall NewThreadPool(size_t nThreads) = 0;
     virtual AVSMap* __stdcall GetAVSMap(PVideoFrame& frame) = 0;
+		virtual bool __stdcall InvokeThread(AVSValue* result, const char* name, const AVSValue& args,
+			const char* const* arg_names, IScriptEnvironment2* env) = 0;
 
 		// Nekopanda: new cache control mechanism
 		virtual void __stdcall SetCacheMode(CacheMode mode) = 0;
