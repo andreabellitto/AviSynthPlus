@@ -1214,7 +1214,7 @@ public:
   AVSMapValue(double d) AVS_BakedCode(AVS_LinkCall(AVSMapValue_CONSTRUCTOR3)(d))
   AVSMapValue(const AVSMapValue& other) AVS_BakedCode(AVS_LinkCall(AVSMapValue_CONSTRUCTOR4)(other))
   ~AVSMapValue() AVS_BakedCode(AVS_LinkCall(AVSMapValue_DESTRUCTOR)())
-  AVSMapValue& operator=(const AVSMapValue& other) AVS_BakedCode(return AVS_LinkCall(AVSMapValue_OPERATOR_ASSIGN)(other))
+  AVSMapValue& operator=(const AVSMapValue& other) AVS_BakedCode(return AVS_LinkCallV(AVSMapValue_OPERATOR_ASSIGN)(other))
 
     bool IsFrame() const AVS_BakedCode(return AVS_LinkCall(AVSMapValue_IsFrame)())
     bool IsInt() const AVS_BakedCode(return AVS_LinkCall(AVSMapValue_IsInt)())
