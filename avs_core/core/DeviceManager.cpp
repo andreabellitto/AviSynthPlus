@@ -1025,10 +1025,52 @@ public:
     env->ThrowError("Not supported device ...");
     return AVSValue();
   }
+
+  static AVSValue __cdecl Eval(AVSValue args, void* user_data, IScriptEnvironment* env_)
+  {
+     int upstreamType = (int)(size_t)user_data;
+     InternalEnvironment* env = static_cast<InternalEnvironment*>(env_);
+
+     const char* str = args[0].AsString();
+     int upstreamIndex = (args.ArraySize() >= 2 && args[1].Defined()) ? args[1].AsInt() : 0;
+
+     Device* upstreamDevice = nullptr;
+     switch (upstreamType) {
+     case DEV_TYPE_CPU:
+        upstreamDevice = env->GetDevice(DEV_TYPE_CPU, 0);
+        break;
+     case DEV_TYPE_CUDA:
+        upstreamDevice = env->GetDevice(DEV_TYPE_CUDA, upstreamIndex);
+        break;
+     default:
+        env->ThrowError("Not supported device ...");
+        break;
+     }
+
+     Device* downstreamDevice = env->SetCurrentDevice(upstreamDevice);
+
+     if (downstreamDevice == nullptr) {
+        env->ThrowError("This thread is not created by AviSynth. It is not allowed to invoke script on this thread ...");
+     }
+
+     try {
+        ScriptParser parser(env, args[0].AsString(), "EvalOnDevice");
+        PExpression exp = parser.Parse();
+        AVSValue ret = exp->Evaluate(env);
+        env->SetCurrentDevice(downstreamDevice);
+        return ret;
+     }
+     catch (...) {
+        env->SetCurrentDevice(downstreamDevice);
+        throw;
+     }
+  }
 };
 
 extern const AVSFunction Device_filters[] = {
   { "OnCPU", BUILTIN_FUNC_PREFIX, "c[num_prefetch]i", OnDevice::Create, (void*)DEV_TYPE_CPU },
   { "OnCUDA", BUILTIN_FUNC_PREFIX, "c[num_prefetch]i[device_index]i", OnDevice::Create, (void*)DEV_TYPE_CUDA },
+  { "EvalOnCPU", BUILTIN_FUNC_PREFIX, "s", OnDevice::Eval, (void*)DEV_TYPE_CPU },
+  { "EvalOnCUDA", BUILTIN_FUNC_PREFIX, "s[device_index]i", OnDevice::Eval, (void*)DEV_TYPE_CUDA },
   { 0 }
 };
