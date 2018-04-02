@@ -724,3 +724,50 @@ AVSValue __cdecl UseVar::Create(AVSValue args, void* user_data, IScriptEnvironme
 {
    return new UseVar(args[0].AsClip(), args[1], env);
 }
+
+
+AddProp::AddProp(PClip _child, const char* name, AVSValue eval, IScriptEnvironment* env)
+   : GenericVideoFilter(_child)
+   , name(name)
+   , eval(eval)
+{ }
+
+AddProp::~AddProp() { }
+
+PVideoFrame __stdcall AddProp::GetFrame(int n, IScriptEnvironment* env)
+{
+   GlobalVarFrame var_frame(static_cast<IScriptEnvironment2*>(env)); // allocate new frame
+   env->SetGlobalVar("last", (AVSValue)child);       // Set implicit last
+   env->SetGlobalVar("current_frame", (AVSValue)n);  // Set frame to be tested
+
+   ScriptParser parser(env, eval.AsString(), "[AddProp Expression]");
+   PExpression exp = parser.Parse();
+   AVSValue result = exp->Evaluate(env);
+   PVideoFrame frame = child->GetFrame(n, env);
+
+   if (result.IsInt())
+      frame->SetProperty(name, result.AsInt());
+   else if (result.IsBool())
+      frame->SetProperty(name, (int)result.AsBool());
+   else if (result.IsFloat())
+      frame->SetProperty(name, result.AsFloat());
+   else if (result.IsString())
+      env->ThrowError("AddProp: Invalid return type (Was a string)");
+   else if (result.IsArray())
+      env->ThrowError("AddProp: Invalid return type (Was an array)");
+   else if (!result.Defined())
+      env->ThrowError("AddProp: Invalid return type (Was not defined value)");
+   else
+      env->ThrowError("AddProp: Invalid return type (Was unknown type)");
+
+   return frame;
+}
+
+int __stdcall AddProp::SetCacheHints(int cachehints, int frame_range) {
+   return cachehints == CACHE_GET_MTMODE ? MT_NICE_FILTER : 0;
+}
+
+AVSValue __cdecl AddProp::Create(AVSValue args, void* user_data, IScriptEnvironment* env)
+{
+   return new AddProp(args[0].AsClip(), args[1].AsString(), args[2], env);
+}

@@ -119,3 +119,18 @@ public:
    int __stdcall SetCacheHints(int cachehints, int frame_range);
    static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env);
 };
+
+
+class AddProp : public GenericVideoFilter
+{
+private:
+   const char* name;
+   AVSValue eval;
+
+public:
+   AddProp(PClip _child, const char* name, AVSValue eval, IScriptEnvironment* env);
+   ~AddProp();
+   PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env);
+   int __stdcall SetCacheHints(int cachehints, int frame_range);
+   static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env);
+};

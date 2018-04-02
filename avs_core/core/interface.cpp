@@ -557,7 +557,7 @@ BYTE* VideoFrame::GetWritePtr(int plane) const {
   return vfb->data + GetOffset(plane);
 }
 
-void VideoFrame::SetProps(const char* key, const AVSMapValue& value) {
+void VideoFrame::SetProperty(const char* key, const AVSMapValue& value) {
   
   if (value.IsFrame()) {
     const AVSMap *childmap = value.GetFrame()->avsmap;
@@ -574,7 +574,7 @@ void VideoFrame::SetProps(const char* key, const AVSMapValue& value) {
   }
 }
 
-const AVSMapValue* VideoFrame::GetProps(const char* key) const {
+const AVSMapValue* VideoFrame::GetProperty(const char* key) const {
   auto it = (*avsmap).find(key);
   if (it == (*avsmap).end()) return nullptr;
   return &it->second;
@@ -1199,8 +1199,8 @@ static const AVS_Linkage avs_linkage = {    // struct AVS_Linkage {
   NULL,                                     //   reserved for AviSynth+
 /**********************************************************************/
   // AviSynth+CUDA additions
-  &VideoFrame::SetProps,
-  &VideoFrame::GetProps,
+  &VideoFrame::SetProperty,
+  &VideoFrame::GetProperty,
 
   // class AVSMapValue
   &AVSMapValue::CONSTRUCTOR0,

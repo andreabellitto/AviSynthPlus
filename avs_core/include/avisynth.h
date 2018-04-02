@@ -337,8 +337,8 @@ struct AVS_Linkage {
   void    (VideoInfo::*reserved2[32])();
 /**********************************************************************/
   // AviSynth+CUDA additions
-  void                (VideoFrame::*SetProps)(const char* key, const AVSMapValue& value);
-  const AVSMapValue*  (VideoFrame::*GetProps)(const char* key) const;
+  void                (VideoFrame::*SetProperty)(const char* key, const AVSMapValue& value);
+  const AVSMapValue*  (VideoFrame::*GetProperty)(const char* key) const;
 
   // class AVSMapValue
   void            (AVSMapValue::*AVSMapValue_CONSTRUCTOR0)();
@@ -897,8 +897,8 @@ public:
   bool IsWritable() const AVS_BakedCode( return AVS_LinkCall(IsWritable)() )
   BYTE* GetWritePtr(int plane=0) const AVS_BakedCode( return AVS_LinkCall(VFGetWritePtr)(plane) )
 
-  void SetProps(const char* key, const AVSMapValue& value) AVS_BakedCode(return AVS_LinkCall(SetProps)(key, value))
-  const AVSMapValue* GetProps(const char* key) const AVS_BakedCode(return AVS_LinkCall(GetProps)(key))
+  void SetProperty(const char* key, const AVSMapValue& value) AVS_BakedCode(return AVS_LinkCall(SetProperty)(key, value))
+  const AVSMapValue* GetProperty(const char* key) const AVS_BakedCode(return AVS_LinkCall(GetProperty)(key))
 
   ~VideoFrame() AVS_BakedCode( AVS_LinkCall_Void(VideoFrame_DESTRUCTOR)() )
 #ifdef BUILDING_AVSCORE
