@@ -526,6 +526,8 @@ void ConditionalReader::ThrowLine(const char* err, int line, IScriptEnvironment*
 PVideoFrame __stdcall ConditionalReader::GetFrame(int n, IScriptEnvironment* env)
 {
   AVSValue v = GetFrameValue(n);
+
+  GlobalVarFrame var_frame(static_cast<IScriptEnvironment2*>(env)); // allocate new frame
   env->SetGlobalVar(variableName, v);
 
   PVideoFrame src = child->GetFrame(n,env);
@@ -536,6 +538,18 @@ PVideoFrame __stdcall ConditionalReader::GetFrame(int n, IScriptEnvironment* env
     env->ApplyMessage(&src, vi, v2.AsString(""), vi.width/2, 0xa0a0a0, 0, 0);
   }
   return src;
+}
+
+int __stdcall ConditionalReader::SetCacheHints(int cachehints, int frame_range)
+{
+  switch (cachehints)
+  {
+  case CACHE_GET_MTMODE:
+    return MT_NICE_FILTER;
+  case CACHE_GET_DEV_TYPE:
+    return (child->GetVersion() >= 5) ? child->SetCacheHints(CACHE_GET_DEV_TYPE, 0) : 0;
+  }
+  return 0;  // We do not pass cache requests upwards.
 }
 
 
@@ -671,6 +685,18 @@ bool Write::DoEval( IScriptEnvironment* env) {
 	return keep_this_line;
 }
 
+int __stdcall Write::SetCacheHints(int cachehints, int frame_range)
+{
+  switch (cachehints)
+  {
+  case CACHE_GET_MTMODE:
+    return MT_SERIALIZED;
+  case CACHE_GET_DEV_TYPE:
+    return (child->GetVersion() >= 5) ? child->SetCacheHints(CACHE_GET_DEV_TYPE, 0) : 0;
+  }
+  return 0;  // We do not pass cache requests upwards.
+}
+
 AVSValue __cdecl Write::Create(AVSValue args, void*, IScriptEnvironment* env)
 {
 	return new Write(args[0].AsClip(), args[1].AsString(EMPTY), args[2], 0, args[3].AsBool(true),args[4].AsBool(true), env);
@@ -717,7 +743,14 @@ PVideoFrame __stdcall UseVar::GetFrame(int n, IScriptEnvironment* env)
 }
 
 int __stdcall UseVar::SetCacheHints(int cachehints, int frame_range) {
-   return cachehints == CACHE_GET_MTMODE ? MT_NICE_FILTER : 0;
+  switch (cachehints)
+  {
+  case CACHE_GET_MTMODE:
+    return MT_NICE_FILTER;
+  case CACHE_GET_DEV_TYPE:
+    return (child->GetVersion() >= 5) ? child->SetCacheHints(CACHE_GET_DEV_TYPE, 0) : 0;
+  }
+  return 0;  // We do not pass cache requests upwards.
 }
 
 AVSValue __cdecl UseVar::Create(AVSValue args, void* user_data, IScriptEnvironment* env)
@@ -763,8 +796,16 @@ PVideoFrame __stdcall AddProp::GetFrame(int n, IScriptEnvironment* env)
    return frame;
 }
 
-int __stdcall AddProp::SetCacheHints(int cachehints, int frame_range) {
-   return cachehints == CACHE_GET_MTMODE ? MT_NICE_FILTER : 0;
+int __stdcall AddProp::SetCacheHints(int cachehints, int frame_range)
+{
+  switch (cachehints)
+  {
+  case CACHE_GET_MTMODE:
+    return MT_NICE_FILTER;
+  case CACHE_GET_DEV_TYPE:
+    return (child->GetVersion() >= 5) ? child->SetCacheHints(CACHE_GET_DEV_TYPE, 0) : 0;
+  }
+  return 0;  // We do not pass cache requests upwards.
 }
 
 AVSValue __cdecl AddProp::Create(AVSValue args, void* user_data, IScriptEnvironment* env)

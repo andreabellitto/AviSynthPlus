@@ -74,6 +74,7 @@ ConditionalSelect::ConditionalSelect(PClip _child, const char _expression[],
   GenericVideoFilter(_child), expression(_expression),
   num_args(_num_args), child_array(_child_array), show(_show) {
     
+  child_devs = -1;
   for (int i=0; i<num_args; i++) {
     const VideoInfo& vin = child_array[i]->GetVideoInfo();
 
@@ -88,6 +89,8 @@ ConditionalSelect::ConditionalSelect(PClip _child, const char _expression[],
 
     if (vi.num_frames < vin.num_frames) // Max of all clips
       vi.num_frames = vin.num_frames;
+
+    child_devs &= GetDeviceTypes(child_array[i]);
   }
 }
 
@@ -98,7 +101,14 @@ ConditionalSelect::~ConditionalSelect() {
 
 int __stdcall ConditionalSelect::SetCacheHints(int cachehints, int frame_range)
 {
-  return cachehints == CACHE_GET_MTMODE ? MT_NICE_FILTER : 0;
+  switch (cachehints)
+  {
+  case CACHE_GET_MTMODE:
+    return MT_NICE_FILTER;
+  case CACHE_GET_DEV_TYPE:
+    return child_devs;
+  }
+  return 0;  // We do not pass cache requests upwards.
 }
 
 PVideoFrame __stdcall ConditionalSelect::GetFrame(int n, IScriptEnvironment* env) {
@@ -231,6 +241,8 @@ ConditionalFilter::ConditionalFilter(PClip _child, PClip _source1, PClip _source
     vi.fps_numerator = vi1.fps_numerator;
     vi.nchannels = vi1.nchannels;
     vi.sample_type = vi1.sample_type;
+
+    child_devs = (GetDeviceTypes(source1) & GetDeviceTypes(source2));
   }
 
 const char* const t_TRUE="TRUE"; 
@@ -238,7 +250,16 @@ const char* const t_FALSE="FALSE";
 
 int __stdcall ConditionalFilter::SetCacheHints(int cachehints, int frame_range)
 {
-  return cachehints == CACHE_GET_MTMODE ? MT_NICE_FILTER : 0;
+  switch (cachehints)
+  {
+  case CACHE_GET_MTMODE:
+    return MT_NICE_FILTER;
+  case CACHE_GET_DEV_TYPE:
+    return child_devs;
+  case CACHE_GET_CHILD_DEV_TYPE:
+    return DEV_TYPE_ANY;
+  }
+  return 0;  // We do not pass cache requests upwards.
 }
 
 PVideoFrame __stdcall ConditionalFilter::GetFrame(int n, IScriptEnvironment* env) {
@@ -423,7 +444,14 @@ int __stdcall ScriptClip::SetCacheHints(int cachehints, int frame_range)
     return 0;
   }
 #else
-  return cachehints == CACHE_GET_MTMODE ? MT_NICE_FILTER : 0;
+  switch (cachehints)
+  {
+  case CACHE_GET_MTMODE:
+    return MT_NICE_FILTER;
+  case CACHE_GET_DEV_TYPE:
+    return (child->GetVersion() >= 5) ? child->SetCacheHints(CACHE_GET_DEV_TYPE, 0) : 0;
+  }
+  return 0;  // We do not pass cache requests upwards.
 #endif
 }
 

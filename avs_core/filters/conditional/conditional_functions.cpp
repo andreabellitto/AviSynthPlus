@@ -899,7 +899,10 @@ AVSValue GetProp_::Create(AVSValue args, void* user_data, IScriptEnvironment* en
    PVideoFrame src = child->GetFrame(n, env);
    const AVSMapValue* result = src->GetProperty(args[1].AsString());
 
-   if (result->IsInt()) {
+   if (result == nullptr) {
+     env->ThrowError("GetProp: No property named %s", args[1].AsString());
+   }
+   else if (result->IsInt()) {
       return (AVSValue)(int)result->GetInt();
    }
    else if (result->IsFloat()) {

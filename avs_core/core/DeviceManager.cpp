@@ -673,7 +673,7 @@ class CUDAFrameTransferEngine : public FrameTransferEngine
     TransferFrameData(dst, src, false, env);
 
     AVSMap* mapv = env->GetAVSMap(dst);
-    for (auto it = mapv->begin(), end = mapv->end(); it != end; ++it) {
+    for (auto it = mapv->data.begin(), end = mapv->data.end(); it != end; ++it) {
       if (it->second.IsFrame()) {
         PVideoFrame src = it->second.GetFrame();
         PVideoFrame dst = env->GetOnDeviceFrame(src, downstreamDevice);
@@ -702,7 +702,7 @@ class CUDAFrameTransferEngine : public FrameTransferEngine
     TransferFrameData(cacheHandle.first->value, item.src, true, env);
 
     AVSMap* mapv = env->GetAVSMap(cacheHandle.first->value);
-    for (auto it = mapv->begin(), end = mapv->end(); it != end; ++it) {
+    for (auto it = mapv->data.begin(), end = mapv->data.end(); it != end; ++it) {
       if (it->second.IsFrame()) {
         PVideoFrame src = it->second.GetFrame();
         PVideoFrame dst = env->GetOnDeviceFrame(src, downstreamDevice);
@@ -994,7 +994,7 @@ public:
       return MT_NICE_FILTER;
     }
     if (cachehints == CACHE_GET_DEV_TYPE) {
-      return 0xFF; // any devices
+      return DEV_TYPE_ANY;
     }
     if (cachehints == CACHE_GET_CHILD_DEV_TYPE) {
       return upstreamDevice->device_type;

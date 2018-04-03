@@ -472,7 +472,7 @@ void VideoFrame::Release() {
 
   if (!InterlockedDecrement(&refcount)) {
     if (avsmap) {
-      avsmap->clear();
+      avsmap->data.clear();
     }
     InterlockedDecrement(&_vfb->refcount);
   }
@@ -558,10 +558,11 @@ BYTE* VideoFrame::GetWritePtr(int plane) const {
 }
 
 void VideoFrame::SetProperty(const char* key, const AVSMapValue& value) {
-  
+
   if (value.IsFrame()) {
     const AVSMap *childmap = value.GetFrame()->avsmap;
-    for (auto it = childmap->begin(); it != childmap->end(); ++it) {
+    std::unique_lock<std::mutex> global_lock(childmap->mutex);
+    for (auto it = childmap->data.begin(); it != childmap->data.end(); ++it) {
       if (it->second.IsFrame()) {
         // cannot contain frame recursively
         return;
@@ -569,14 +570,13 @@ void VideoFrame::SetProperty(const char* key, const AVSMapValue& value) {
     }
   }
 
-  if (refcount == 1 && vfb->refcount == 1) {
-    (*avsmap)[key] = value;
-  }
+  std::unique_lock<std::mutex> global_lock(avsmap->mutex);
+  avsmap->data[key] = value;
 }
 
 const AVSMapValue* VideoFrame::GetProperty(const char* key) const {
-  auto it = (*avsmap).find(key);
-  if (it == (*avsmap).end()) return nullptr;
+  auto it = avsmap->data.find(key);
+  if (it == avsmap->data.end()) return nullptr;
   return &it->second;
 }
 
@@ -973,7 +973,7 @@ void AVSMapValue::Set(const AVSMapValue& other) {
     other.value.frame->AddRef();
 
   type = other.type;
-  value.frame = other.value.frame;
+  value.i = other.value.i;
 }
 
 bool AVSMapValue::IsFrame() const { return type == AVS_VALUE_FRAME; }

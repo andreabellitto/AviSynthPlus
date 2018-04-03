@@ -1380,6 +1380,7 @@ enum AvsAllocType
 enum AvsDeviceType {
   DEV_TYPE_CPU = 1,
   DEV_TYPE_CUDA = 2,
+  DEV_TYPE_ANY = 0xFFFF
 };
 
 /* -----------------------------------------------------------------------------

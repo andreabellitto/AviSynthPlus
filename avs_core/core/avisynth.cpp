@@ -1716,7 +1716,7 @@ VideoFrame* ScriptEnvironment::GetNewFrame(size_t vfb_size, Device* device)
           // sanity check if its refcount is zero
           // because when a vfb is free (refcount==0) then all its parent frames should also be free
           assert(0 == frame->refcount);
-          assert(0 == frame->avsmap->size());
+          assert(0 == frame->avsmap->data.size());
 
           if (!found)
           {
@@ -2236,7 +2236,7 @@ bool ScriptEnvironment::MakeWritable(PVideoFrame* pvf) {
           vf->GetPitch(PLANAR_A), vf->GetRowSize(PLANAR_A), vf->GetHeight(PLANAR_A));
 
   // Copy properties
-  *dst->avsmap = *vf->avsmap;
+  dst->avsmap->data = vf->avsmap->data;
 
   *pvf = dst;
   return true;
@@ -2271,7 +2271,7 @@ PVideoFrame __stdcall ScriptEnvironment::Subframe(PVideoFrame src, int rel_offse
 
   VideoFrame* subframe;
   subframe = src->Subframe(rel_offset, new_pitch, new_row_size, new_height);
-  *subframe->avsmap = *src->avsmap;
+  subframe->avsmap->data = src->avsmap->data;
 
   size_t vfb_size = src->GetFrameBuffer()->GetDataSize();
 
@@ -2293,7 +2293,7 @@ PVideoFrame __stdcall ScriptEnvironment::SubframePlanar(PVideoFrame src, int rel
     ThrowError("Filter Error: Filter attempted to break alignment of VideoFrame.");
 
   VideoFrame *subframe = src->Subframe(rel_offset, new_pitch, new_row_size, new_height, rel_offsetU, rel_offsetV, new_pitchUV);
-  *subframe->avsmap = *src->avsmap;
+  subframe->avsmap->data = src->avsmap->data;
 
   size_t vfb_size = src->GetFrameBuffer()->GetDataSize();
 
@@ -2315,7 +2315,7 @@ PVideoFrame __stdcall ScriptEnvironment::SubframePlanar(PVideoFrame src, int rel
         ThrowError("Filter Error: Filter attempted to break alignment of VideoFrame.");
     VideoFrame* subframe;
     subframe = src->Subframe(rel_offset, new_pitch, new_row_size, new_height, rel_offsetU, rel_offsetV, new_pitchUV, rel_offsetA);
-    *subframe->avsmap = *src->avsmap;
+    subframe->avsmap->data = src->avsmap->data;
 
     size_t vfb_size = src->GetFrameBuffer()->GetDataSize();
 
@@ -3208,13 +3208,13 @@ PVideoFrame ScriptEnvironment::GetOnDeviceFrame(PVideoFrame& src, Device* device
 	res->offsetA = src->offsetA;
 	res->pitchA = src->pitchA;
 	res->row_sizeA = src->row_sizeA;
-  *res->avsmap = *src->avsmap;
+  res->avsmap->data = src->avsmap->data;
 	return PVideoFrame(res);
 }
 
 void ScriptEnvironment::CopyFrameProps(PVideoFrame src, PVideoFrame dst)
 {
-  *dst->avsmap = *src->avsmap;
+  dst->avsmap->data = src->avsmap->data;
 }
 
 ThreadPool* ScriptEnvironment::NewThreadPool(size_t nThreads)

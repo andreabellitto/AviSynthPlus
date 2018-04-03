@@ -22,6 +22,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <vector>
+#include <mutex>
 
 
 enum {
@@ -63,6 +64,7 @@ public:
   ConditionalReader(PClip _child, const char* filename, const char _varname[], bool _show, IScriptEnvironment* env);
   ~ConditionalReader(void);
   PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env);
+  int __stdcall SetCacheHints(int cachehints, int frame_range);
   static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env);
 };
 
@@ -95,6 +97,7 @@ public:
     Write(PClip _child, const char* _filename, AVSValue args, int _linecheck, bool _flush, bool _append, IScriptEnvironment* env);
 	~Write(void);
 	PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env);
+  int __stdcall SetCacheHints(int cachehints, int frame_range);
 	static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env);
 	static AVSValue __cdecl Create_If(AVSValue args, void* user_data, IScriptEnvironment* env);
 	static AVSValue __cdecl Create_Start(AVSValue args, void* user_data, IScriptEnvironment* env);
