@@ -2739,6 +2739,11 @@ bool __stdcall ScriptEnvironment::Invoke(AVSValue* result, const char* name, con
   return InvokeFunc(result, name, nullptr, args, arg_names);
 }
 
+struct SuppressThreadCounter {
+  SuppressThreadCounter() { ++g_suppress_thread_count; }
+  ~SuppressThreadCounter() { --g_suppress_thread_count; }
+};
+
 bool __stdcall ScriptEnvironment::InvokeFunc(AVSValue *result, const char* name, const Function *f, const AVSValue& args, const char* const* arg_names)
 {
 	if (g_thread_id != 0) {
@@ -2762,6 +2767,8 @@ bool __stdcall ScriptEnvironment::InvokeFunc(AVSValue *result, const char* name,
 #else
   std::lock_guard<std::recursive_mutex> env_lock(memory_mutex);
 #endif
+
+  SuppressThreadCounter suppressThreadCount_;
 
   bool strict = false;
 

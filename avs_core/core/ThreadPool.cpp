@@ -32,6 +32,7 @@ public:
 };
 
 __declspec(thread) size_t g_thread_id;
+__declspec(thread) int g_suppress_thread_count;
 
 void ThreadPool::ThreadFunc(size_t thread_id, ThreadPoolPimpl * const _pimpl, InternalEnvironment* env)
 {

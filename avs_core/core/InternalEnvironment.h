@@ -60,6 +60,11 @@ class ConcurrentVarStringFrame;
 extern __declspec(thread) size_t g_thread_id;
 extern __declspec(thread) int g_getframe_recursive_count;
 
+// concurrent GetFrame with Invoke cause deadlock
+// increment this variable when Invoke running
+// to prevent submitting job to threadpool
+extern __declspec(thread) int g_suppress_thread_count;
+
 // Strictly for Avisynth core only.
 // Neither host applications nor plugins should use
 // these interfaces.
