@@ -6,6 +6,7 @@
 #include "InternalEnvironment.h"
 #include <cassert>
 #include <Imagehlp.h>
+#include "parser/script.h" // TODO we only need GlobalFunction from here
 
 typedef const char* (__stdcall *AvisynthPluginInit3Func)(IScriptEnvironment* env, const AVS_Linkage* const vectors);
 typedef const char* (__stdcall *AvisynthPluginInit2Func)(IScriptEnvironment* env);
@@ -249,7 +250,7 @@ bool AVSFunction::IsScriptFunction() const
   //if (!stricmp(this->name, "srestore_inside_1"))
   //  return true;
 #endif
-  return ( (apply == &(ScriptFunction::Execute))
+  return ( (apply == &(GlobalFunction::Execute))
 		  || (apply == &Eval)
           || (apply == &EvalOop)
           || (apply == &Import)
@@ -270,7 +271,7 @@ bool AVSFunction::IsRuntimeScriptFunction() const
   //if (!stricmp(this->name, "srestore_inside_1"))
   //  return true;
 
-  return (apply == &(ScriptFunction::Execute));
+  return (apply == &(GlobalFunction::Execute));
 }
 #endif
 

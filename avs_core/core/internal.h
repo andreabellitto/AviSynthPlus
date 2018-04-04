@@ -56,7 +56,6 @@ enum MANAGE_CACHE_KEYS
 };
 
 #include <avisynth.h>
-#include "parser/script.h" // TODO we only need ScriptFunction from here
 #include <emmintrin.h>
 
 class AVSFunction {

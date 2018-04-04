@@ -285,10 +285,16 @@ extern const AVSFunction Script_functions[] = {
 
 
 /**********************************
- *******   Script Function   ******
+***********   Function   **********
+*********************************/
+
+
+
+/**********************************
+ *******   Global Function   ******
  *********************************/
 
-ScriptFunction::ScriptFunction( const PExpression& _body, const bool* _param_floats,
+GlobalFunction::GlobalFunction( const PExpression& _body, const bool* _param_floats,
                                 const char** _param_names, int param_count )
   : body(_body)
 {
@@ -300,9 +306,9 @@ ScriptFunction::ScriptFunction( const PExpression& _body, const bool* _param_flo
 }
 
 
-AVSValue ScriptFunction::Execute(AVSValue args, void* user_data, IScriptEnvironment* env)
+AVSValue GlobalFunction::Execute(AVSValue args, void* user_data, IScriptEnvironment* env)
 {
-  ScriptFunction* self = (ScriptFunction*)user_data;
+  GlobalFunction* self = (GlobalFunction*)user_data;
   env->PushContext();
   for (int i=0; i<args.ArraySize(); ++i)
     env->SetVar( self->param_names[i], // Force float args that are actually int to be float
@@ -321,9 +327,9 @@ AVSValue ScriptFunction::Execute(AVSValue args, void* user_data, IScriptEnvironm
   return result;
 }
 
-void ScriptFunction::Delete(void* self, IScriptEnvironment*)
+void GlobalFunction::Delete(void* self, IScriptEnvironment*)
 {
-    delete (ScriptFunction*)self;
+    delete (GlobalFunction*)self;
 }
 
 

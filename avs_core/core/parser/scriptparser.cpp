@@ -80,6 +80,30 @@ void ScriptParser::Expect(int op, const char* msg=0)
 
 void ScriptParser::ParseFunctionDefinition(void) 
 {
+  // variable capture
+  if (tokenizer.IsOperator('[')) {
+    tokenizer.NextToken();
+    bool need_comma = false;
+    for (;;) {
+      if (tokenizer.IsOperator(']')) {
+        tokenizer.NextToken();
+        break;
+      }
+      if (need_comma) {
+        Expect(',', "Script error: expected a , or ]");
+      }
+
+      if (tokenizer.IsIdentifier()) {
+        //
+      }
+      else {
+        env->ThrowError("Script error: expected a parameter name");
+      }
+
+      need_comma = true;
+    }
+  }
+
   if (!tokenizer.IsIdentifier())
     env->ThrowError("Script error: expected a function name");
   const char* name = tokenizer.AsIdentifier();
@@ -152,9 +176,9 @@ void ScriptParser::ParseFunctionDefinition(void)
 
   param_types[param_chars] = 0;
   PExpression body = new ExpRootBlock(ParseBlock(true, NULL));
-  ScriptFunction* sf = new ScriptFunction(body, param_floats, param_names, param_count);
-  env->AtExit(ScriptFunction::Delete, sf);
-  env->AddFunction(name, env->SaveString(param_types), ScriptFunction::Execute, sf, "$UserFunctions$");
+  GlobalFunction* sf = new GlobalFunction(body, param_floats, param_names, param_count);
+  env->AtExit(GlobalFunction::Delete, sf);
+  env->AddFunction(name, env->SaveString(param_types), GlobalFunction::Execute, sf, "$UserFunctions$");
 }
 
 
