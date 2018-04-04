@@ -77,6 +77,10 @@ public:
       return 1;
     case CACHE_GET_MTMODE:
       return MT_NICE_FILTER;
+    case CACHE_GET_DEV_TYPE:
+       return DEV_TYPE_CPU;
+    case CACHE_GET_CHILD_DEV_TYPE:
+       return DEV_TYPE_ANY; // any type is ok because this clip does not require child's frames.
     default:
       return 0;
     }
