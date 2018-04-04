@@ -546,3 +546,23 @@ AVSValue ExpFunctionCall::Evaluate(IScriptEnvironment* env)
   assert(0);  // we should never get here
   return 0;
 }
+
+
+ExpFunctionDefinition::ExpFunctionDefinition(const char* name, PFunction func, bool is_global)
+  : name(name), func(func), is_global(is_global)
+{ }
+
+AVSValue ExpFunctionDefinition::Evaluate(IScriptEnvironment* env)
+{
+  if (name == nullptr) {
+    return func;
+  }
+  if (is_global) {
+    env->SetGlobalVar(name, func);
+  }
+  else {
+    env->SetVar(name, func);
+  }
+  return AVSValue();
+}
+

@@ -10,6 +10,7 @@
 #include "LruCache.h"
 #include "ThreadPool.h"
 #include "AVSMap.h"
+#include "parser/scriptparser.h"
 
 #define ENABLE_CUDA_COMPUTE_STREAM 0
 

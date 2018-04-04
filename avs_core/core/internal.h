@@ -39,6 +39,7 @@
 #include <avs/config.h>
 #include <avs/minmax.h>
 #include <stdint.h>
+#include <string.h>
 #include "version.h"
 
 #define AVS_CLASSIC_VERSION 2.60  // Note: Used by VersionNumber() script function
@@ -57,42 +58,7 @@ enum MANAGE_CACHE_KEYS
 
 #include <avisynth.h>
 #include <emmintrin.h>
-
-class AVSFunction {
-
-public:
-
-  typedef AVSValue (__cdecl *apply_func_t)(AVSValue args, void* user_data, IScriptEnvironment* env);
-
-  const apply_func_t apply;
-  char* name;
-  char* canon_name;
-  char* param_types;
-  void* user_data;
-  char* dll_path;
-
-  AVSFunction(void*);
-  AVSFunction(const char* _name, const char* _plugin_basename, const char* _param_types, apply_func_t _apply);
-  AVSFunction(const char* _name, const char* _plugin_basename, const char* _param_types, apply_func_t _apply, void *_user_data);
-  AVSFunction(const char* _name, const char* _plugin_basename, const char* _param_types, apply_func_t _apply, void *_user_data, const char* _dll_path);
-  ~AVSFunction();
-
-  AVSFunction() = delete;
-  AVSFunction(const AVSFunction&) = delete;
-  AVSFunction& operator=(const AVSFunction&) = delete;
-  AVSFunction(AVSFunction&&) = delete;
-  AVSFunction& operator=(AVSFunction&&) = delete;
-
-  bool empty() const;
-  bool IsScriptFunction() const;
-#ifdef DEBUG_GSCRIPTCLIP_MT
-  bool IsRuntimeScriptFunction() const;
-#endif
-
-  static bool ArgNameMatch(const char* param_types, size_t args_names_count, const char* const* arg_names);
-  static bool TypeMatch(const char* param_types, const AVSValue* args, size_t num_args, bool strict, IScriptEnvironment* env);
-  static bool SingleTypeMatch(char type, const AVSValue& arg, bool strict);
-};
+#include "function.h"
 
 
 int RGB2YUV(int rgb);
@@ -242,32 +208,6 @@ __forceinline __m128i _MM_PACKUS_EPI32_SRC_TRUEWORD(__m128i a, __m128i b)
   b = _mm_srai_epi32 (b, 16);
   a = _mm_packs_epi32 (a, b);
   return a;
-}
-
-__forceinline __m128i _MM_CMPLE_EPU16(__m128i x, __m128i y)
-{
-  // Returns 0xFFFF where x <= y:
-  return _mm_cmpeq_epi16(_mm_subs_epu16(x, y), _mm_setzero_si128());
-}
-
-__forceinline __m128i _MM_BLENDV_SI128(__m128i x, __m128i y, __m128i mask)
-{
-  // Replace bit in x with bit in y when matching bit in mask is set:
-  return _mm_or_si128(_mm_andnot_si128(mask, x), _mm_and_si128(mask, y));
-}
-
-// sse2 simulation of SSE4's _mm_min_epu16
-__forceinline __m128i _MM_MIN_EPU16(__m128i x, __m128i y)
-{
-  // Returns x where x <= y, else y:
-  return _MM_BLENDV_SI128(y, x, _MM_CMPLE_EPU16(x, y));
-}
-
-// sse2 simulation of SSE4's _mm_max_epu16
-__forceinline __m128i _MM_MAX_EPU16(__m128i x, __m128i y)
-{
-  // Returns x where x >= y, else y:
-  return _MM_BLENDV_SI128(x, y, _MM_CMPLE_EPU16(x, y));
 }
 
 // unsigned short div 255

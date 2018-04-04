@@ -36,6 +36,7 @@
 #define __Expression_H__
 
 #include <avisynth.h>
+#include "../function.h"
 
 #ifdef NEW_AVSVALUE
 #include <vector>
@@ -422,6 +423,20 @@ private:
   const char** arg_expr_names;
   const int arg_expr_count;
   const bool oop_notation;
+};
+
+
+class ExpFunctionDefinition : public Expression
+{
+public:
+  ExpFunctionDefinition(const char* name, PFunction func, bool is_global);
+
+  virtual AVSValue Evaluate(IScriptEnvironment* env);
+
+private:
+  const char* const name;
+  PFunction func;
+  const bool is_global;
 };
 
 

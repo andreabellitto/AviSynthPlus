@@ -5,6 +5,7 @@
 #include "strings.h"
 #include "InternalEnvironment.h"
 #include <cassert>
+#include <avs/win.h>
 #include <Imagehlp.h>
 #include "parser/script.h" // TODO we only need GlobalFunction from here
 
@@ -179,39 +180,45 @@ AVSFunction::AVSFunction(const char* _name, const char* _plugin_basename, const 
 {}
 
 AVSFunction::AVSFunction(const char* _name, const char* _plugin_basename, const char* _param_types, apply_func_t _apply, void *_user_data, const char* _dll_path) :
-    apply(_apply), name(NULL), canon_name(NULL), param_types(NULL), user_data(_user_data), dll_path(NULL)
+    Function()
 {
+  apply = _apply;
+
     if (NULL != _dll_path)
     {
         size_t len = strlen(_dll_path);
-        dll_path = new char[len + 1];
-        memcpy(dll_path, _dll_path, len);
-        dll_path[len] = 0;
+        auto tmp = new char[len + 1];
+        memcpy(tmp, _dll_path, len);
+        tmp[len] = 0;
+        dll_path = tmp;
     }
 
     if (NULL != _name)
     {
         size_t len = strlen(_name);
-        name = new char[len + 1];
-        memcpy(name, _name, len);
-        name[len] = 0;
+        auto tmp = new char[len + 1];
+        memcpy(tmp, _name, len);
+        tmp[len] = 0;
+        name = tmp;
     }
 
     if ( NULL != _param_types )
     {
         size_t len = strlen(_param_types);
-        param_types = new char[len+1];
-        memcpy(param_types, _param_types, len);
-        param_types[len] = 0;
+        auto tmp = new char[len+1];
+        memcpy(tmp, _param_types, len);
+        tmp[len] = 0;
+        param_types = tmp;
     }
 
     if ( NULL != _name )
     {
-		std::string cn(NULL != _plugin_basename ? _plugin_basename : "");
+        std::string cn(NULL != _plugin_basename ? _plugin_basename : "");
         cn.append("_").append(_name);
-        canon_name = new char[cn.size()+1];
-        memcpy(canon_name, cn.c_str(), cn.size());
-        canon_name[cn.size()] = 0;
+        auto tmp = new char[cn.size()+1];
+        memcpy(tmp, cn.c_str(), cn.size());
+        tmp[cn.size()] = 0;
+        canon_name = tmp;
     }
 }
 
@@ -250,7 +257,7 @@ bool AVSFunction::IsScriptFunction() const
   //if (!stricmp(this->name, "srestore_inside_1"))
   //  return true;
 #endif
-  return ( (apply == &(GlobalFunction::Execute))
+  return ( (apply == &(ScriptFunction::Execute))
 		  || (apply == &Eval)
           || (apply == &EvalOop)
           || (apply == &Import)

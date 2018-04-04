@@ -46,84 +46,37 @@
 /********************************************************************
 ********************************************************************/
 
-class IFunction {
-public:
-  IFunction() : refcnt(0) {}
-  virtual AVSValue Invoke(AVSValue args, void* user_data, IScriptEnvironment* env) = 0;
 
-private:
-  friend class PFunction;
-  int refcnt;
-  void AddRef() { ++refcnt; }
-  void Release() { if (--refcnt <= 0) delete this; }
-};
-
-class PFunction
-{
-public:
-  PFunction() { Init(0); }
-  PFunction(IFunction* p) { Init(p); }
-  PFunction(const PFunction& p) { Init(p.e); }
-  PFunction& operator=(IFunction* p) { Set(p); return *this; }
-  PFunction& operator=(const PFunction& p) { Set(p.e); return *this; }
-  int operator!() const { return !e; }
-  operator void*() const { return e; }
-  IFunction* operator->() const { return e; }
-  ~PFunction() { Release(); }
-
-private:
-  IFunction * e;
-  void Init(IFunction* p) { e = p; if (e) e->AddRef(); }
-  void Set(IFunction* p) { if (p) p->AddRef(); if (e) e->Release(); e = p; }
-  void Release() { if (e) e->Release(); }
-};
 
 class ScriptFunction : public IFunction
   /**
-  * Executes a script
+  * Encapsul variables
   **/
 {
 public:
-  ScriptFunction(const PExpression& _body, const bool* _param_floats, const char** _param_names, int param_count);
+  ScriptFunction(const PExpression& _body,
+    const char* _name, const char* _param_types,
+    const bool* _param_floats, const char** _param_names, int param_count,
+    const char** _var_names, int _var_count,
+    IScriptEnvironment* env);
   virtual ~ScriptFunction()
   {
     delete[] param_floats;
     delete[] param_names;
+    delete[] var_names;
+    delete[] var_data;
   }
 
   static AVSValue Execute(AVSValue args, void* user_data, IScriptEnvironment* env);
 
 private:
   const PExpression body;
-  AVSFunction avs_func;
   bool *param_floats;
   const char** param_names;
+  int var_count;
+  const char** var_names;
+  AVSValue *var_data;
 };
-
-
-class GlobalFunction 
-/**
-  * Executes a script
- **/
-{
-public:
-  GlobalFunction(const PExpression& _body, const bool* _param_floats, const char** _param_names, int param_count);
-  virtual ~GlobalFunction() 
-    {
-      delete[] param_floats;
-      delete[] param_names;
-    }
-
-  static AVSValue Execute(AVSValue args, void* user_data, IScriptEnvironment* env);
-  static void Delete(void* self, IScriptEnvironment*);
-
-private:
-  const PExpression body;
-  bool *param_floats;
-  const char** param_names;
-};
-
-
 
 
 /****    Helper functions   ****/
