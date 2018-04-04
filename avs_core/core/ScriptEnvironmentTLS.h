@@ -10,8 +10,6 @@
 #include "DeviceManager.h"
 #include "InternalEnvironment.h"
 
-extern __declspec(thread) size_t g_thread_id;
-
 #define CHECK_THREAD if(g_thread_id != thread_id) \
 	core->ThrowError("Invalid ScriptEnvironment. You are using different thread's environment.")
 
