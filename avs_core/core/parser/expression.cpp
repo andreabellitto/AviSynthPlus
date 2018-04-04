@@ -519,10 +519,10 @@ AVSValue ExpFunctionCall::Evaluate(IScriptEnvironment* env)
   AVSValue result;
   InternalEnvironment *env2 = static_cast<InternalEnvironment*>(env);
 
-  // evaluate anonymous function if given
+  // if name is not given, evaluate to get the function 
   const Function* real_func = nullptr;
   AVSValue eval_result; // function must be exist until the function call ends
-  if (func) {
+  if (name == nullptr) {
     eval_result = func->Evaluate(env);
     if (!eval_result.IsFunction()) {
       env->ThrowError("Script error: named function cannot be evaluated as a function");
@@ -560,12 +560,36 @@ AVSValue ExpFunctionCall::Evaluate(IScriptEnvironment* env)
 }
 
 
-ExpFunctionDefinition::ExpFunctionDefinition(const char* name, PFunction func, bool is_global)
-  : name(name), func(func), is_global(is_global)
-{ }
+
+ExpFunctionDefinition::ExpFunctionDefinition(
+  const PExpression& body,
+  const char* name, const char* param_types,
+  const bool* _param_floats, const char** _param_names, int param_count,
+  const char** _var_names, int var_count, bool is_global)
+  : body(body)
+  , name(name)
+  , param_types(param_types)
+  , param_floats(nullptr)
+  , param_names(nullptr)
+  , var_count(var_count)
+  , var_names(nullptr)
+  , is_global(is_global)
+{
+  param_floats = new bool[param_count];
+  memcpy(param_floats, _param_floats, param_count * sizeof(const bool));
+
+  param_names = new const char*[param_count];
+  memcpy(param_names, _param_names, param_count * sizeof(const char*));
+
+  if (var_count > 0) {
+    var_names = new const char*[var_count];
+    memcpy(var_names, _var_names, var_count * sizeof(const char*));
+  }
+}
 
 AVSValue ExpFunctionDefinition::Evaluate(IScriptEnvironment* env)
 {
+  AVSValue func = PFunction(new FunctionInstance(this, env));
   if (name == nullptr) {
     return func;
   }
@@ -578,3 +602,66 @@ AVSValue ExpFunctionDefinition::Evaluate(IScriptEnvironment* env)
   return AVSValue();
 }
 
+
+
+FunctionInstance::FunctionInstance(ExpFunctionDefinition* pdef, IScriptEnvironment* env)
+  : pdef(pdef), pdef_ref(pdef), var_data(nullptr)
+{
+  IScriptEnvironment2 *env2 = static_cast<IScriptEnvironment2*>(env);
+
+  apply = Execute_;
+
+  if (pdef->name) {
+    std::string cn("_");
+    cn.append(pdef->name);
+    name = pdef->name;
+    canon_name = env->SaveString(cn.c_str());
+  }
+
+  param_types = pdef->param_types;
+  user_data = this;
+  dll_path = nullptr;
+
+  if (pdef->var_count > 0) {
+    AVSValue result;
+    var_data = new AVSValue[pdef->var_count];
+    for (int i = 0; i < pdef->var_count; ++i) {
+      if (!env2->GetVar(pdef->var_names[i], &result)) {
+        env->ThrowError("No variable named '%s'", name);
+      }
+      var_data[i] = result;
+    }
+  }
+}
+FunctionInstance::~FunctionInstance() {
+  delete[] var_data;
+}
+
+AVSValue FunctionInstance::Execute(const AVSValue& args, IScriptEnvironment* env)
+{
+  env->PushContext();
+  for (int i = 0; i < pdef->var_count; ++i) {
+    env->SetVar(pdef->var_names[i], var_data[i]);
+  }
+  for (int i = 0; i<args.ArraySize(); ++i)
+    env->SetVar(pdef->param_names[i], // Force float args that are actually int to be float
+    (pdef->param_floats[i] && args[i].IsInt()) ? float(args[i].AsInt()) : args[i]);
+
+  AVSValue result;
+  try {
+    result = pdef->body->Evaluate(env);
+  }
+  catch (...) {
+    env->PopContext();
+    throw;
+  }
+
+  env->PopContext();
+  return result;
+}
+
+AVSValue FunctionInstance::Execute_(AVSValue args, void* user_data, IScriptEnvironment* env)
+{
+  FunctionInstance* self = (FunctionInstance*)user_data;
+  return self->Execute(args, env);
+}

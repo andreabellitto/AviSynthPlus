@@ -722,7 +722,7 @@ public:
 	virtual void __stdcall SetCacheMode(CacheMode mode);
 	virtual CacheMode __stdcall GetCacheMode();
 
-  virtual void __stdcall UpdateFunctionExports(const PFunction& func, const char *exportVar);
+  virtual void __stdcall UpdateFunctionExports(const char* funcName, const char* funcParams, const char *exportVar);
   virtual bool __stdcall InvokeFunc(AVSValue *result, const char* name, const Function *f, const AVSValue& args, const char* const* arg_names = 0);
 
 private:
@@ -3355,7 +3355,7 @@ CacheMode ScriptEnvironment::GetCacheMode()
 	return cacheMode;
 }
 
-void ScriptEnvironment::UpdateFunctionExports(const PFunction& func, const char *exportVar)
+void ScriptEnvironment::UpdateFunctionExports(const char* funcName, const char* funcParams, const char *exportVar)
 {
   if (g_thread_id != 0 || g_getframe_recursive_count != 0) {
     // no need to export function at runtime
@@ -3363,8 +3363,7 @@ void ScriptEnvironment::UpdateFunctionExports(const PFunction& func, const char 
   }
 
   std::unique_lock<std::recursive_mutex> env_lock(plugin_mutex);
-  plugin_manager->UpdateFunctionExports(func->name, func->param_types, exportVar);
-  plugin_manager->UpdateFunctionExports(func->canon_name, func->param_types, exportVar);
+  plugin_manager->UpdateFunctionExports(funcName, funcParams, exportVar);
 }
 
 extern void ApplyMessage(PVideoFrame* frame, const VideoInfo& vi,

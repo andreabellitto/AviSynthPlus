@@ -47,38 +47,6 @@
 ********************************************************************/
 
 
-
-class ScriptFunction : public IFunction
-  /**
-  * Encapsul variables
-  **/
-{
-public:
-  ScriptFunction(const PExpression& _body,
-    const char* _name, const char* _param_types,
-    const bool* _param_floats, const char** _param_names, int param_count,
-    const char** _var_names, int _var_count,
-    IScriptEnvironment* env);
-  virtual ~ScriptFunction()
-  {
-    delete[] param_floats;
-    delete[] param_names;
-    delete[] var_names;
-    delete[] var_data;
-  }
-
-  static AVSValue Execute(AVSValue args, void* user_data, IScriptEnvironment* env);
-
-private:
-  const PExpression body;
-  bool *param_floats;
-  const char** param_names;
-  int var_count;
-  const char** var_names;
-  AVSValue *var_data;
-};
-
-
 /****    Helper functions   ****/
 
 AVSValue Assert(AVSValue args, void*, IScriptEnvironment* env);

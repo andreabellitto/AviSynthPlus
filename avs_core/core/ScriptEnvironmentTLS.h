@@ -545,7 +545,7 @@ public:
 		return core->GetCacheMode();
 	}
 
-  virtual void __stdcall UpdateFunctionExports(const PFunction &, const char *)
+  virtual void __stdcall UpdateFunctionExports(const char*, const char*, const char *)
   {
     return;
   }
