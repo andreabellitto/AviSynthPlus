@@ -17,7 +17,9 @@ struct Function {
 
 class IFunction : public Function {
 public:
-  IFunction() : refcnt(0) {}
+  IFunction() : Function(), refcnt(0) {}
+  virtual ~IFunction() { }
+  const Function* GetDefinition() const { return this; }
 
 private:
   friend class PFunction;
@@ -71,11 +73,11 @@ public:
   AVSFunction& operator=(AVSFunction&&) = delete;
 
   bool empty() const;
-  bool IsScriptFunction() const;
 #ifdef DEBUG_GSCRIPTCLIP_MT
   bool IsRuntimeScriptFunction() const;
 #endif
 
+  static bool IsScriptFunction(const Function* func);
   static bool ArgNameMatch(const char* param_types, size_t args_names_count, const char* const* arg_names);
   static bool TypeMatch(const char* param_types, const AVSValue* args, size_t num_args, bool strict, IScriptEnvironment* env);
   static bool SingleTypeMatch(char type, const AVSValue& arg, bool strict);

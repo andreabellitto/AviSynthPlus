@@ -235,7 +235,7 @@ bool AVSFunction::empty() const
     return NULL == name;
 }
 
-bool AVSFunction::IsScriptFunction() const
+bool AVSFunction::IsScriptFunction(const Function* func)
 {
 #ifdef DEBUG_GSCRIPTCLIP_MT
   /*
@@ -257,10 +257,10 @@ bool AVSFunction::IsScriptFunction() const
   //if (!stricmp(this->name, "srestore_inside_1"))
   //  return true;
 #endif
-  return ( (apply == &(ScriptFunction::Execute))
-		  || (apply == &Eval)
-          || (apply == &EvalOop)
-          || (apply == &Import)
+  return ( (func->apply == &(ScriptFunction::Execute))
+		  || (func->apply == &Eval)
+          || (func->apply == &EvalOop)
+          || (func->apply == &Import)
         );
 }
 
@@ -862,7 +862,7 @@ void PluginManager::AddFunction(const char* name, const char* params, IScriptEnv
   {
       newFunc = new AVSFunction(name, NULL, params, apply, user_data, NULL);
       if(apply != &create_c_video_filter)
-        assert(newFunc->IsScriptFunction());
+        assert(AVSFunction::IsScriptFunction(newFunc));
   }
 
   // Warn user if a function with the same name is already registered by another plugin

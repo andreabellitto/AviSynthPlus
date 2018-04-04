@@ -70,8 +70,8 @@ public:
     virtual int __stdcall IncrImportDepth() = 0;
     virtual int __stdcall DecrImportDepth() = 0;
     virtual void __stdcall AdjustMemoryConsumption(size_t amount, bool minus) = 0;
-    virtual bool __stdcall FilterHasMtMode(const AVSFunction* filter) const = 0;
-    virtual MtMode __stdcall GetFilterMTMode(const AVSFunction* filter, bool* is_forced) const = 0; // If filter is "", gets the default MT mode
+    virtual bool __stdcall FilterHasMtMode(const Function* filter) const = 0;
+    virtual MtMode __stdcall GetFilterMTMode(const Function* filter, bool* is_forced) const = 0; // If filter is "", gets the default MT mode
     virtual ClipDataStore* __stdcall ClipData(IClip *clip) = 0;
     virtual MtMode __stdcall GetDefaultMtMode() const = 0;
     virtual void __stdcall SetLogParams(const char *target, int level) = 0;
@@ -94,7 +94,7 @@ public:
 	  virtual PVideoFrame __stdcall GetOnDeviceFrame(PVideoFrame& src, Device* device) = 0;
 		virtual ThreadPool* __stdcall NewThreadPool(size_t nThreads) = 0;
     virtual AVSMap* __stdcall GetAVSMap(PVideoFrame& frame) = 0;
-		virtual bool __stdcall InvokeThread(AVSValue* result, const char* name, const AVSValue& args,
+		virtual bool __stdcall InvokeThread(AVSValue* result, const char* name, const Function* func, const AVSValue& args,
 			const char* const* arg_names, IScriptEnvironment2* env) = 0;
 
 		// Nekopanda: support multiple prefetcher
@@ -111,6 +111,7 @@ public:
 		bool increaseCache;
 
     virtual void __stdcall UpdateFunctionExports(const PFunction& func, const char *exportVar) = 0;
+    virtual bool __stdcall InvokeFunc(AVSValue *result, const char* name, const Function *f, const AVSValue& args, const char* const* arg_names = 0) = 0;
 };
 
 struct InternalEnvironmentDeleter {
