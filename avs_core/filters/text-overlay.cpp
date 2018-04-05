@@ -44,9 +44,37 @@
 #include <emmintrin.h>
 
 
+LOGFONTA g_default_font;
+
+static void InitDefaultFont()
+{
+  if (g_default_font.lfFaceName[0] == '\0') {
+    NONCLIENTMETRICS metrics = NONCLIENTMETRICS();
+    metrics.cbSize = sizeof(metrics);
+    if (SystemParametersInfo(SPI_GETNONCLIENTMETRICS, sizeof(metrics), &metrics, 0)) {
+      g_default_font = metrics.lfCaptionFont;
+    }
+  }
+}
+
 
 static HFONT LoadFont(const char name[], int size, bool bold, bool italic, int width=0, int angle=0)
 {
+  if (name[0] == '\0' || size == 0) {
+    InitDefaultFont();
+    // use default font
+    if (name[0] == '\0') {
+      if (g_default_font.lfFaceName[0] != '\0') {
+        name = g_default_font.lfFaceName;
+      }
+      else {
+        name = "Arial";
+      }
+    }
+    if (size == 0) {
+      size = g_default_font.lfHeight;
+    }
+  }
   return CreateFont( size, width, angle, angle, bold ? FW_BOLD : FW_NORMAL,
                      italic, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
                      CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY, FF_DONTCARE | FIXED_PITCH /*FF_DONTCARE | DEFAULT_PITCH*/, name );
@@ -1096,7 +1124,7 @@ AVSValue __cdecl ShowFrameNumber::Create(AVSValue args, void*, IScriptEnvironmen
   const int offset = args[2].AsInt(0);
   const int x = args[3].IsFloat() ? int(args[3].AsFloat()*8+0.5) : DefXY;
   const int y = args[4].IsFloat() ? int(args[4].AsFloat()*8+0.5) : DefXY;
-  const char* font = args[5].AsString("Arial");
+  const char* font = args[5].AsString("");
   const int size = int(args[6].AsFloat(24)*8+0.5);
   const int text_color = args[7].AsInt(0xFFFF00);
   const int halo_color = args[8].AsInt(0);
@@ -1275,7 +1303,7 @@ AVSValue __cdecl ShowSMPTE::CreateSMTPE(AVSValue args, void*, IScriptEnvironment
   const int yreal = arg0vi.height-8;
   const int x = int(args[4].AsDblDef(xreal)*8+0.5);
   const int y = int(args[5].AsDblDef(yreal)*8+0.5);
-  const char* font = args[6].AsString("Arial");
+  const char* font = args[6].AsString("");
   const int size = int(args[7].AsFloat(24)*8+0.5);
   const int text_color = args[8].AsInt(0xFFFF00);
   const int halo_color = args[9].AsInt(0);
@@ -1292,7 +1320,7 @@ AVSValue __cdecl ShowSMPTE::CreateTime(AVSValue args, void*, IScriptEnvironment*
   const int yreal = args[0].AsClip()->GetVideoInfo().height-8;
   const int x = int(args[2].AsDblDef(xreal)*8+0.5);
   const int y = int(args[3].AsDblDef(yreal)*8+0.5);
-  const char* font = args[4].AsString("Arial");
+  const char* font = args[4].AsString("");
   const int size = int(args[5].AsFloat(24)*8+0.5);
   const int text_color = args[6].AsInt(0xFFFF00);
   const int halo_color = args[7].AsInt(0);
@@ -1385,8 +1413,8 @@ AVSValue __cdecl Subtitle::Create(AVSValue args, void*, IScriptEnvironment* env)
     const char* text = args[1].AsString();
     const int first_frame = args[4].AsInt(0);
     const int last_frame = args[5].AsInt(clip->GetVideoInfo().num_frames-1);
-    const char* font = args[6].AsString("Arial");
-    const int size = int(args[7].AsFloat(18)*8+0.5);
+    const char* font = args[6].AsString("");
+    const int size = int(args[7].AsFloat(24)*8+0.5);
     const int text_color = args[8].AsInt(0xFFFF00);
     const int halo_color = args[9].AsInt(0);
     const int align = args[10].AsInt(args[2].AsFloat(0)==-1?2:7);
@@ -2699,7 +2727,7 @@ void ApplyMessage( PVideoFrame* frame, const VideoInfo& vi, const char* message,
     textcolor = RGB2YUV(textcolor);
     halocolor = RGB2YUV(halocolor);
   }
-  Antialiaser antialiaser(vi.width, vi.height, "Arial", size, textcolor, halocolor);
+  Antialiaser antialiaser(vi.width, vi.height, "", size, textcolor, halocolor);
   HDC hdcAntialias = antialiaser.GetDC();
   if  (hdcAntialias)
   {

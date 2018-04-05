@@ -453,7 +453,7 @@ PClip Create_MessageClip(const char* message, int width, int height, int pixel_t
   int size;
   for (size = 24*8; /*size>=9*8*/; size-=4) {
     int text_width, text_height;
-    GetTextBoundingBox(message, "Arial", size, true, false, TA_TOP | TA_CENTER, &text_width, &text_height);
+    GetTextBoundingBox(message, "", size, true, false, TA_TOP | TA_CENTER, &text_width, &text_height);
     text_width = ((text_width>>3)+8+7) & ~7;
     text_height = ((text_height>>3)+8+1) & ~1;
     if (size<=9*8 || ((width<=0 || text_width<=width) && (height<=0 || text_height<=height))) {
