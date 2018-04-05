@@ -722,10 +722,14 @@ AVSValue __cdecl Write::Create_End(AVSValue args, void*, IScriptEnvironment* env
 UseVar::UseVar(PClip _child, AVSValue vars, IScriptEnvironment* env)
    : GenericVideoFilter(_child)
 {
+  IScriptEnvironment2* env2 = static_cast<IScriptEnvironment2*>(env);
+
    vars_.resize(vars.ArraySize());
    for (int i = 0; i < vars.ArraySize(); ++i) {
       auto name = vars_[i].name = vars[i].AsString();
-      vars_[i].val = env->GetVar(name);
+      if (!env2->GetVar(name, &vars_[i].val)) {
+        env->ThrowError("UseVar: No variable named %s", name);
+      }
    }
 }
 
