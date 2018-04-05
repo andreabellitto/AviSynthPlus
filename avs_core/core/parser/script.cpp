@@ -181,13 +181,16 @@ extern const AVSFunction Script_functions[] = {
   { "GetParity", BUILTIN_FUNC_PREFIX, "c[n]i", GetParity },
   { "String",    BUILTIN_FUNC_PREFIX, ".[]s", String },
   { "Hex",       BUILTIN_FUNC_PREFIX, "i[width]i", Hex }, // avs+ 20180222 new width parameter
+  { "Func",    BUILTIN_FUNC_PREFIX, "n", Func },
 
   { "IsBool",   BUILTIN_FUNC_PREFIX, ".", IsBool },
   { "IsInt",    BUILTIN_FUNC_PREFIX, ".", IsInt },
   { "IsFloat",  BUILTIN_FUNC_PREFIX, ".", IsFloat },
   { "IsString", BUILTIN_FUNC_PREFIX, ".", IsString },
   { "IsClip",   BUILTIN_FUNC_PREFIX, ".", IsClip },
+  { "IsFunction", BUILTIN_FUNC_PREFIX, ".", IsFunction },
   { "Defined",  BUILTIN_FUNC_PREFIX, ".", Defined },
+  { "TypeName",  BUILTIN_FUNC_PREFIX, ".", TypeName },
 
   { "Default",  BUILTIN_FUNC_PREFIX, "..", Default },
 
@@ -1323,6 +1326,7 @@ AVSValue String(AVSValue args, void*, IScriptEnvironment* env)
 {
   if (args[0].IsString()) return args[0];
   if (args[0].IsBool()) return (args[0].AsBool()?"true":"false");
+  if (args[0].IsFunction()) return args[0].AsFunction()->ToString(env);
   if (args[1].Defined()) {	// WE --> a format parameter is present
 		if (args[0].IsFloat()) {	//if it is an Int: IsFloat gives True, also !
 			return  env->Sprintf(args[1].AsString("%f"),args[0].AsFloat());
@@ -1358,12 +1362,37 @@ AVSValue Hex(AVSValue args, void*, IScriptEnvironment* env)
   return env->SaveString(buf);
 }
 
+AVSValue Func(AVSValue args, void*, IScriptEnvironment* env) { return args[0]; }
+
 AVSValue IsBool(AVSValue args, void*, IScriptEnvironment* env) { return args[0].IsBool(); }
 AVSValue IsInt(AVSValue args, void*, IScriptEnvironment* env) { return args[0].IsInt(); }
 AVSValue IsFloat(AVSValue args, void*, IScriptEnvironment* env) { return args[0].IsFloat(); }
 AVSValue IsString(AVSValue args, void*, IScriptEnvironment* env) { return args[0].IsString(); }
 AVSValue IsClip(AVSValue args, void*, IScriptEnvironment* env) { return args[0].IsClip(); }
+AVSValue IsFunction(AVSValue args, void*, IScriptEnvironment* env) { return args[0].IsFunction(); }
 AVSValue Defined(AVSValue args, void*, IScriptEnvironment* env) { return args[0].Defined(); }
+
+AVSValue TypeName(AVSValue args, void*, IScriptEnvironment* env)
+{
+  if (args[0].IsClip())
+    return "clip";
+  else if (args[0].IsBool())
+    return "bool";
+  else if (args[0].IsInt())
+    return "int";
+  else if (args[0].IsFloat())
+    return "float";
+  else if (args[0].IsString())
+    return "string";
+  else if (args[0].IsArray())
+    return "array";
+  else if (args[0].IsFunction())
+    return "function";
+  else if (!args[0].Defined())
+    return "undefined value";
+  else
+    return "unknown type";
+}
 
 AVSValue Default(AVSValue args, void*, IScriptEnvironment* env) { return args[0].Defined() ? args[0] : args[1]; }
 AVSValue VersionNumber(AVSValue args, void*, IScriptEnvironment* env) { return AVS_CLASSIC_VERSION; }

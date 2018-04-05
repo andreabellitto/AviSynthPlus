@@ -34,6 +34,7 @@
 
 
 #include "expression.h"
+#include "script.h"
 #include "../exception.h"
 #include "../internal.h"
 #include "../InternalEnvironment.h"
@@ -298,6 +299,9 @@ AVSValue ExpEqual::Evaluate(IScriptEnvironment* env)
   else if (x.IsString() && y.IsString()) {
     return !lstrcmpi(x.AsString(), y.AsString());
   }
+  else if (x.IsFunction() && y.IsFunction()) {
+    return x.AsFunction() == y.AsFunction();
+  }
   else {
     env->ThrowError("Evaluate: operands of `==' and `!=' must be comparable");
     return 0;
@@ -519,16 +523,24 @@ AVSValue ExpFunctionCall::Evaluate(IScriptEnvironment* env)
   AVSValue result;
   InternalEnvironment *env2 = static_cast<InternalEnvironment*>(env);
 
-  // if name is not given, evaluate to get the function 
+  const char* real_name = name;
   const Function* real_func = nullptr;
   AVSValue eval_result; // function must be exist until the function call ends
-  if (name == nullptr) {
+  if (real_name == nullptr) {
+    // if name is not given, evaluate expression to get the function 
     eval_result = func->Evaluate(env);
     if (!eval_result.IsFunction()) {
-      env->ThrowError("Script error: named function cannot be evaluated as a function");
+      if (eval_result.IsClip())
+        env->ThrowError(
+          "Script error: '%s' cannot be called. Give me a function!",
+          TypeName(eval_result, nullptr, env));
     }
-    real_func = eval_result.AsFunction()->GetDefinition();
+    auto& func = eval_result.AsFunction();
+    real_name = func->GetLegacyName();
+    real_func = func->GetDefinition();
   }
+
+  assert(real_name || real_func);
 
   std::vector<AVSValue> args(arg_expr_count+1, AVSValue());
   for (int a=0; a<arg_expr_count; ++a)
@@ -537,7 +549,7 @@ AVSValue ExpFunctionCall::Evaluate(IScriptEnvironment* env)
   // first try without implicit "last"
   try
   { // Invoke can always throw by calling a constructor of a filter that throws
-    if (env2->InvokeFunc(&result, name, real_func, AVSValue(args.data()+1, arg_expr_count), arg_expr_names+1))
+    if (env2->InvokeFunc(&result, real_name, real_func, AVSValue(args.data()+1, arg_expr_count), arg_expr_names+1))
       return result;
   } catch(const IScriptEnvironment::NotFound&){}
 
@@ -546,26 +558,67 @@ AVSValue ExpFunctionCall::Evaluate(IScriptEnvironment* env)
   {
     try
     {
-      if (env2->GetVar("last", args.data()) && env2->Invoke(&result, name, AVSValue(args.data(), arg_expr_count+1), arg_expr_names))
+      if (env2->GetVar("last", args.data()) &&
+          env2->InvokeFunc(&result, real_name, real_func, AVSValue(args.data(), arg_expr_count+1), arg_expr_names))
         return result;
     } catch(const IScriptEnvironment::NotFound&){}
   }
 
-  env->ThrowError(env->FunctionExists(name) ?
-    "Script error: Invalid arguments to function '%s'." :
-  "Script error: There is no function named '%s'.", name);
+  if (real_name == nullptr) {
+    // anonymous function
+    env->ThrowError("Script error: Invalid arguments to %s.",
+      eval_result.AsFunction()->ToString(env));
+  }
+  else {
+    AVSValue var;
+    if (env2->GetVar(real_name, &var) && var.IsFunction() && var.AsFunction()->GetLegacyName()) {
+      real_name = var.AsFunction()->GetLegacyName();
+    }
+    env->ThrowError(env->FunctionExists(real_name) ?
+      "Script error: Invalid arguments to function '%s'." :
+      "Script error: There is no function named '%s'.", real_name);
+  }
 
   assert(0);  // we should never get here
   return 0;
 }
 
 
+class WrappedFunction : public IFunction
+{
+public:
+  WrappedFunction(const char* const name)
+    : name(name) { }
+  virtual const char* ToString(IScriptEnvironment* env) {
+    return env->Sprintf("Wrapped Function: %s", name);
+  }
+  virtual const char* GetLegacyName() { return name; }
+  virtual const Function* GetDefinition() { return nullptr; }
+
+private:
+  const char* const name;
+};
+
+ExpFunctionWrapper::ExpFunctionWrapper(const char* name)
+  : func(new WrappedFunction(name)), name(name) { }
+
+AVSValue ExpFunctionWrapper::Evaluate(IScriptEnvironment* env) {
+  IScriptEnvironment2 *env2 = static_cast<IScriptEnvironment2*>(env);
+  AVSValue result;
+  if (env2->GetVar(name, &result) && result.IsFunction()) {
+    // if reference variable exists, returns it
+    return result;
+  }
+  return func;
+}
+
 
 ExpFunctionDefinition::ExpFunctionDefinition(
   const PExpression& body,
   const char* name, const char* param_types,
   const bool* _param_floats, const char** _param_names, int param_count,
-  const char** _var_names, int var_count, bool is_global)
+  const char** _var_names, int var_count,
+  const char* filename, int line)
   : body(body)
   , name(name)
   , param_types(param_types)
@@ -573,7 +626,8 @@ ExpFunctionDefinition::ExpFunctionDefinition(
   , param_names(nullptr)
   , var_count(var_count)
   , var_names(nullptr)
-  , is_global(is_global)
+  , filename(filename)
+  , line(line)
 {
   param_floats = new bool[param_count];
   memcpy(param_floats, _param_floats, param_count * sizeof(const bool));
@@ -593,41 +647,36 @@ AVSValue ExpFunctionDefinition::Evaluate(IScriptEnvironment* env)
   if (name == nullptr) {
     return func;
   }
-  if (is_global) {
-    env->SetGlobalVar(name, func);
-  }
-  else {
-    env->SetVar(name, func);
-  }
+  env->SetGlobalVar(name, func);
   return AVSValue();
 }
 
 
 
 FunctionInstance::FunctionInstance(ExpFunctionDefinition* pdef, IScriptEnvironment* env)
-  : pdef(pdef), pdef_ref(pdef), var_data(nullptr)
+  : data(), pdef(pdef), pdef_ref(pdef), var_data(nullptr)
 {
   IScriptEnvironment2 *env2 = static_cast<IScriptEnvironment2*>(env);
 
-  apply = Execute_;
+  data.apply = Execute_;
 
   if (pdef->name) {
     std::string cn("_");
     cn.append(pdef->name);
-    name = pdef->name;
-    canon_name = env->SaveString(cn.c_str());
+    data.name = pdef->name;
+    data.canon_name = env->SaveString(cn.c_str());
   }
 
-  param_types = pdef->param_types;
-  user_data = this;
-  dll_path = nullptr;
+  data.param_types = pdef->param_types;
+  data.user_data = this;
+  data.dll_path = nullptr;
 
   if (pdef->var_count > 0) {
     AVSValue result;
     var_data = new AVSValue[pdef->var_count];
     for (int i = 0; i < pdef->var_count; ++i) {
       if (!env2->GetVar(pdef->var_names[i], &result)) {
-        env->ThrowError("No variable named '%s'", name);
+        env->ThrowError("No variable named '%s'", pdef->var_names[i]);
       }
       var_data[i] = result;
     }
@@ -635,6 +684,16 @@ FunctionInstance::FunctionInstance(ExpFunctionDefinition* pdef, IScriptEnvironme
 }
 FunctionInstance::~FunctionInstance() {
   delete[] var_data;
+}
+
+const char* FunctionInstance::ToString(IScriptEnvironment* env)
+{
+  if (pdef->name) {
+    return env->Sprintf("Named Function: %s defined at %s, line %d", pdef->name, pdef->filename, pdef->line);
+  }
+  else {
+    return env->Sprintf("Anonymous Function: defined at %s, line %d", pdef->filename, pdef->line);
+  }
 }
 
 AVSValue FunctionInstance::Execute(const AVSValue& args, IScriptEnvironment* env)

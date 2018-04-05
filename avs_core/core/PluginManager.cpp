@@ -184,6 +184,7 @@ AVSFunction::AVSFunction(const char* _name, const char* _plugin_basename, const 
     Function()
 {
   apply = _apply;
+  user_data = _user_data;
 
     if (NULL != _dll_path)
     {
@@ -291,6 +292,7 @@ bool AVSFunction::SingleTypeMatch(char type, const AVSValue& arg, bool strict) {
     case 'f': return arg.IsFloat() && (!strict || !arg.IsInt());
     case 's': return arg.IsString();
     case 'c': return arg.IsClip();
+    case 'n': return arg.IsFunction();
 #ifdef NEW_AVSVALUE
     case 'a': return arg.IsArray(); // PF 161028 AVS+ script arrays
 #endif
@@ -345,6 +347,7 @@ bool AVSFunction::TypeMatch(const char* param_types, const AVSValue* args, size_
 
     switch (*param_types) {
       case 'b': case 'i': case 'f': case 's': case 'c':
+      case 'n':
 #ifdef NEW_AVSVALUE
       case 'a': // PF Arrays
 #endif

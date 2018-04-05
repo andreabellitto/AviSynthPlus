@@ -15,11 +15,13 @@ struct Function {
 };
 
 
-class IFunction : public Function {
+class IFunction {
 public:
-  IFunction() : Function(), refcnt(0) {}
+  IFunction() : refcnt(0) {}
   virtual ~IFunction() { }
-  const Function* GetDefinition() const { return this; }
+  virtual const char* ToString(IScriptEnvironment* env) = 0;
+  virtual const char* GetLegacyName() = 0;
+  virtual const Function* GetDefinition() = 0;
 
 private:
   friend class PFunction;

@@ -81,11 +81,6 @@ void ScriptParser::Expect(int op, const char* msg=0)
 
 PExpression ScriptParser::ParseFunctionDefinition(void)
 {
-  bool global_spcified = false;
-  if (tokenizer.IsIdentifier("global")) {
-    tokenizer.NextToken();
-    global_spcified = true;
-  }
   const char* name = nullptr;
   if (tokenizer.IsIdentifier()) {
     name = tokenizer.AsIdentifier();
@@ -186,10 +181,11 @@ PExpression ScriptParser::ParseFunctionDefinition(void)
     }
   }
 
+  int line = tokenizer.GetLine();
+
   param_types[param_chars] = 0;
   PExpression body = new ExpRootBlock(ParseBlock(true, NULL));
   
-  bool is_global = global_spcified || (var_count == 0);
   const char* saved_param_names = env->SaveString(param_types);
 
   if (name) {
@@ -198,7 +194,8 @@ PExpression ScriptParser::ParseFunctionDefinition(void)
   }
   
   return new ExpFunctionDefinition(body, name, saved_param_names,
-    param_floats, param_names, param_count, var_names, var_count, is_global);
+    param_floats, param_names, param_count, var_names, var_count,
+    filename, line);
 }
 
 
@@ -622,7 +619,17 @@ PExpression ScriptParser::ParseCall(PExpression left, PExpression context)
       need_comma = true;
     }
   }
-  left = new ExpFunctionCall(left->GetLvalue(), left, args, arg_names, i, !!context);
+
+  const char* name = left->GetLvalue();
+  if (name && i == 1 && args[0]->GetLvalue() && lstrcmpi(name, "func") == 0) {
+    // special case the parser should deal with
+    // "func(LegacyFunctionName)"
+    left = new ExpFunctionWrapper(args[0]->GetLvalue());
+  }
+  else {
+    left = new ExpFunctionCall(name, left, args, arg_names, i, !!context);
+  }
+
   if (tokenizer.IsOperator('(')) {
     return ParseCall(left, nullptr);
   }

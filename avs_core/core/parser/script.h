@@ -133,13 +133,17 @@ AVSValue IsFrameBased(AVSValue args, void*, IScriptEnvironment* env);
 AVSValue GetParity(AVSValue args, void*, IScriptEnvironment* env);
 AVSValue String(AVSValue args, void*, IScriptEnvironment* env);
 AVSValue Hex(AVSValue args, void*, IScriptEnvironment* env);
+AVSValue Func(AVSValue args, void*, IScriptEnvironment* env);
 
 AVSValue IsBool(AVSValue args, void*, IScriptEnvironment* env);
 AVSValue IsInt(AVSValue args, void*, IScriptEnvironment* env);
 AVSValue IsFloat(AVSValue args, void*, IScriptEnvironment* env);
 AVSValue IsString(AVSValue args, void*, IScriptEnvironment* env);
 AVSValue IsClip(AVSValue args, void*, IScriptEnvironment* env);
+AVSValue IsFunction(AVSValue args, void*, IScriptEnvironment* env);
 AVSValue Defined(AVSValue args, void*, IScriptEnvironment* env);
+
+AVSValue TypeName(AVSValue args, void*, IScriptEnvironment* env);
 
 AVSValue Default(AVSValue args, void*, IScriptEnvironment* env);
 

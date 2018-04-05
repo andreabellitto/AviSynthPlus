@@ -58,6 +58,7 @@ enum MANAGE_CACHE_KEYS
 
 #include <avisynth.h>
 #include <emmintrin.h>
+#include <string>
 #include "function.h"
 
 

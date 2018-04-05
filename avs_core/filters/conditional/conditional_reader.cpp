@@ -785,14 +785,8 @@ PVideoFrame __stdcall AddProp::GetFrame(int n, IScriptEnvironment* env)
       frame->SetProperty(name, (int)result.AsBool());
    else if (result.IsFloat())
       frame->SetProperty(name, result.AsFloat());
-   else if (result.IsString())
-      env->ThrowError("AddProp: Invalid return type (Was a string)");
-   else if (result.IsArray())
-      env->ThrowError("AddProp: Invalid return type (Was an array)");
-   else if (!result.Defined())
-      env->ThrowError("AddProp: Invalid return type (Was not defined value)");
-   else
-      env->ThrowError("AddProp: Invalid return type (Was unknown type)");
+   else 
+      env->ThrowError("AddProp: Invalid return type (Was a %s)", TypeName(result, nullptr, env));
 
    return frame;
 }

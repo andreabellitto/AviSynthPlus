@@ -2524,12 +2524,18 @@ const Function* ScriptEnvironment::Lookup(const char* search_name, const AVSValu
 {
   AVSValue avsv;
   if (GetVar(search_name, &avsv) && avsv.IsFunction()) {
-    const PFunction& func = avsv.AsFunction();
-    if (AVSFunction::TypeMatch(func->param_types, args, num_args, false, this) &&
+    auto& funcv = avsv.AsFunction();
+    const char* name = funcv->GetLegacyName();
+    const Function* func = funcv->GetDefinition();
+    if (name != nullptr) {
+      // wrapped function
+      search_name = name;
+    }
+    else if (AVSFunction::TypeMatch(func->param_types, args, num_args, false, this) &&
       AVSFunction::ArgNameMatch(func->param_types, args_names_count, arg_names))
     {
       pstrict = AVSFunction::TypeMatch(func->param_types, args, num_args, true, this);
-      return func->GetDefinition();
+      return func;
     }
   }
 
