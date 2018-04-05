@@ -393,6 +393,17 @@ AVSValue EvalOop(AVSValue args, void*, IScriptEnvironment* env)
   return result;
 }
 
+static std::unique_ptr<char[]> WideToMultiByte(int codePage, LPCWSTR src, int len) {
+  if (len == 0) {
+    return std::unique_ptr<char[]>(new char[1]());
+  }
+  int dstlen = WideCharToMultiByte(codePage, 0, src, len, NULL, 0, NULL, NULL);
+  auto ret = std::unique_ptr<char[]>(new char[dstlen + 1]);
+  WideCharToMultiByte(codePage, 0, src, len, ret.get(), dstlen, NULL, NULL);
+  ret[dstlen] = 0;
+  return ret;
+}
+
 AVSValue Import(AVSValue args, void*, IScriptEnvironment* env)
 {
   // called as s+ or s+[Utf8]b
@@ -449,63 +460,46 @@ AVSValue Import(AVSValue args, void*, IScriptEnvironment* env)
     // -- full_path
     int full_path_len = (int)wcslen(full_path_w);
     // ansi
-    TCHAR *full_path = new TCHAR[full_path_len + 1];
-    WideCharToMultiByte(AreFileApisANSI() ? CP_ACP : CP_OEMCP, 0, full_path_w, -1, full_path, full_path_len + 1, NULL, NULL); // replaces out-of-CP chars by ?
+    std::unique_ptr<char[]> full_path = WideToMultiByte(AreFileApisANSI() ? CP_ACP : CP_OEMCP, full_path_w, full_path_len); // replaces out-of-CP chars by ?
     // int succ = wcstombs(full_path, full_path_w, full_path_len +1); 
     // no good, stops at non-replacable unicode chars. If wcstombs encounters a wide character it cannot convert to a multibyte character, it returns ÅE cast to type size_t and sets errno to EILSEQ.
     // utf8
-    TCHAR *full_path_utf8 = new TCHAR[full_path_len * 4 + 1];
-    int utf8len = WideCharToMultiByte(CP_UTF8, 0, full_path_w, -1, NULL, 0, 0, 0) - 1; // w/o the \0 terminator
-    WideCharToMultiByte(CP_UTF8, 0, full_path_w, -1, full_path_utf8, utf8len + 1, 0, 0);
+    std::unique_ptr<char[]> full_path_utf8 = WideToMultiByte(CP_UTF8, full_path_w, full_path_len);
 
     // -- file_part
     int file_part_len = (int)wcslen(file_part_w);
     // ansi
-    TCHAR *file_part = new TCHAR[file_part_len + 1];
-    WideCharToMultiByte(AreFileApisANSI() ? CP_ACP : CP_OEMCP, 0, file_part_w, -1, file_part, file_part_len + 1, NULL, NULL);
+    std::unique_ptr<char[]> file_part = WideToMultiByte(AreFileApisANSI() ? CP_ACP : CP_OEMCP, file_part_w, file_part_len);
     // utf8
-    TCHAR *file_part_utf8 = new TCHAR[file_part_len * 4 + 1];
-    int file_part_utf8len = WideCharToMultiByte(CP_UTF8, 0, file_part_w, -1, NULL, 0, 0, 0) - 1;
-    WideCharToMultiByte(CP_UTF8, 0, file_part_w, -1, file_part_utf8, file_part_utf8len + 1, 0, 0);
+    std::unique_ptr<char[]> file_part_utf8 = WideToMultiByte(CP_UTF8, file_part_w, file_part_len);
+
 
     // -- dir_part
     int dir_part_len = full_path_len - file_part_len;
     // ansi
-    TCHAR *dir_part = new TCHAR[dir_part_len + 1];
-    WideCharToMultiByte(AreFileApisANSI() ? CP_ACP : CP_OEMCP, 0, full_path_w, -1, dir_part, dir_part_len, NULL, NULL);
-    dir_part[dir_part_len] = 0;
+    std::unique_ptr<char[]> dir_part = WideToMultiByte(AreFileApisANSI() ? CP_ACP : CP_OEMCP, full_path_w, dir_part_len);
     // utf8
-    TCHAR *dir_part_utf8 = new TCHAR[dir_part_len * 4 + 1];
-    int dir_part_utf8len = WideCharToMultiByte(CP_UTF8, 0, full_path_w, dir_part_len, NULL, 0, 0, 0); // no \0 terminator check requested here
-    WideCharToMultiByte(CP_UTF8, 0, full_path_w, -1, dir_part_utf8, dir_part_utf8len, 0, 0);
-    dir_part_utf8[dir_part_utf8len] = 0;
+    std::unique_ptr<char[]> dir_part_utf8 = WideToMultiByte(CP_UTF8, full_path_w, dir_part_len);
 
     HANDLE h = ::CreateFileW(full_path_w, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
     if (h == INVALID_HANDLE_VALUE)
       env->ThrowError("Import: couldn't open \"%s\"", full_path);
 
-    env->SetGlobalVar("$ScriptName$", env->SaveString(full_path));
-    env->SetGlobalVar("$ScriptFile$", env->SaveString(file_part));
-    env->SetGlobalVar("$ScriptDir$", env->SaveString(dir_part));
-    env->SetGlobalVar("$ScriptNameUtf8$", env->SaveString(full_path_utf8));
-    env->SetGlobalVar("$ScriptFileUtf8$", env->SaveString(file_part_utf8));
-    env->SetGlobalVar("$ScriptDirUtf8$", env->SaveString(dir_part_utf8));
+    env->SetGlobalVar("$ScriptName$", env->SaveString(full_path.get()));
+    env->SetGlobalVar("$ScriptFile$", env->SaveString(file_part.get()));
+    env->SetGlobalVar("$ScriptDir$", env->SaveString(dir_part.get()));
+    env->SetGlobalVar("$ScriptNameUtf8$", env->SaveString(full_path_utf8.get()));
+    env->SetGlobalVar("$ScriptFileUtf8$", env->SaveString(file_part_utf8.get()));
+    env->SetGlobalVar("$ScriptDirUtf8$", env->SaveString(dir_part_utf8.get()));
     if (MainScript)
     {
-      env->SetGlobalVar("$MainScriptName$", env->SaveString(full_path));
-      env->SetGlobalVar("$MainScriptFile$", env->SaveString(file_part));
-      env->SetGlobalVar("$MainScriptDir$", env->SaveString(dir_part));
-      env->SetGlobalVar("$MainScriptNameUtf8$", env->SaveString(full_path_utf8));
-      env->SetGlobalVar("$MainScriptFileUtf8$", env->SaveString(file_part_utf8));
-      env->SetGlobalVar("$MainScriptDirUtf8$", env->SaveString(dir_part_utf8));
+      env->SetGlobalVar("$MainScriptName$", env->SaveString(full_path.get()));
+      env->SetGlobalVar("$MainScriptFile$", env->SaveString(file_part.get()));
+      env->SetGlobalVar("$MainScriptDir$", env->SaveString(dir_part.get()));
+      env->SetGlobalVar("$MainScriptNameUtf8$", env->SaveString(full_path_utf8.get()));
+      env->SetGlobalVar("$MainScriptFileUtf8$", env->SaveString(file_part_utf8.get()));
+      env->SetGlobalVar("$MainScriptDirUtf8$", env->SaveString(dir_part_utf8.get()));
     }
-
-    delete[] full_path;
-    delete[] file_part;
-    delete[] dir_part;
-    delete[] full_path_utf8;
-    delete[] file_part_utf8;
-    delete[] dir_part_utf8;
 
     *file_part_w = 0; // trunc full_path_w to dir-only
     CWDChanger change_cwd(full_path_w); // unicode!
