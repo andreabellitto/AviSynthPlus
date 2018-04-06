@@ -483,7 +483,7 @@ AVSValue Import(AVSValue args, void*, IScriptEnvironment* env)
 
     HANDLE h = ::CreateFileW(full_path_w, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
     if (h == INVALID_HANDLE_VALUE)
-      env->ThrowError("Import: couldn't open \"%s\"", full_path);
+      env->ThrowError("Import: couldn't open \"%s\"", full_path.get());
 
     env->SetGlobalVar("$ScriptName$", env->SaveString(full_path.get()));
     env->SetGlobalVar("$ScriptFile$", env->SaveString(file_part.get()));
