@@ -511,22 +511,30 @@ public:
       numThreads(numThreads),
       threadPool(NULL),
       device(device),
-      videoCache(new CacheType(prefetchFrames*2, CACHE_DEFAULT)),
+      videoCache(NULL),
       numWorkers(0),
       workerExceptionPresent(false)
   {
-    threadPool = env->NewThreadPool(numThreads);
+    if (numThreads > 0 && prefetchFrames > 0) {
+      threadPool = env->NewThreadPool(numThreads);
+      videoCache = std::shared_ptr<CacheType>(new CacheType(prefetchFrames * 2, CACHE_DEFAULT));
+    }
+    else {
+      numThreads = prefetchFrames = 0;
+    }
   }
 
   ~QueuePrefetcher()
   {
-    // finish threadpool
-    threadPool->Finish();
+    if (numThreads > 0) {
+      // finish threadpool
+      threadPool->Finish();
 
-    // cancel queue
-    while (prefetchQueue.size() > 0) {
-      videoCache->rollback(&prefetchQueue.front().second);
-      prefetchQueue.pop_front();
+      // cancel queue
+      while (prefetchQueue.size() > 0) {
+        videoCache->rollback(&prefetchQueue.front().second);
+        prefetchQueue.pop_front();
+      }
     }
   }
 
@@ -862,7 +870,6 @@ public:
     // set upstream device
     upstreamDevice->SetActiveToCurrentThread(env);
 
-
     // do not use thread when invoke running
     if (prefetchFrames == 0 || g_suppress_thread_count > 0) {
       return GetFrameImmediate(n, env);
@@ -959,7 +966,7 @@ public:
     GenericVideoFilter(child),
     upstreamDevice(upstreamDevice),
     prefetchFrames(prefetchFrames),
-    prefetcher(child, prefetchFrames ? 2 : 0, 1, upstreamDevice, env)
+    prefetcher(child, (prefetchFrames >= 2) ? 2 : 0, (prefetchFrames >= 2) ? 1 : 0, upstreamDevice, env)
   { }
 
   PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env_)
