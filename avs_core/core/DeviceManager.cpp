@@ -1077,6 +1077,18 @@ public:
   }
 };
 
+void CopyCUDAFrame(const PVideoFrame& dst, const PVideoFrame& src, IScriptEnvironment2* env)
+{
+  VideoFrameBuffer* srcvfb = src->GetFrameBuffer();
+  VideoFrameBuffer* dstvfb = dst->GetFrameBuffer();
+
+  const BYTE* srcptr = srcvfb->GetReadPtr();
+  BYTE* dstptr = dstvfb->GetWritePtr();
+  int sz = srcvfb->GetDataSize();
+
+  CUDA_CHECK(cudaMemcpyAsync(dstptr, srcptr, sz, cudaMemcpyDeviceToDevice));
+}
+
 extern const AVSFunction Device_filters[] = {
   { "OnCPU", BUILTIN_FUNC_PREFIX, "c[num_prefetch]i", OnDevice::Create, (void*)DEV_TYPE_CPU },
   { "OnCUDA", BUILTIN_FUNC_PREFIX, "c[num_prefetch]i[device_index]i", OnDevice::Create, (void*)DEV_TYPE_CUDA },

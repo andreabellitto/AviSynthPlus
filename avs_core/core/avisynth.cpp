@@ -704,7 +704,7 @@ public:
   virtual Device* __stdcall GetDevice(int device_type, int device_index);
   virtual Device* __stdcall GetCurrentDevice();
   virtual Device* __stdcall SetCurrentDevice(Device* device);
-  virtual PVideoFrame __stdcall GetOnDeviceFrame(PVideoFrame& src, Device* device);
+  virtual PVideoFrame __stdcall GetOnDeviceFrame(const PVideoFrame& src, Device* device);
   virtual void __stdcall CopyFrameProps(PVideoFrame src, PVideoFrame dst);
 	virtual ThreadPool* __stdcall NewThreadPool(size_t nThreads);
   virtual AVSMap* __stdcall GetAVSMap(PVideoFrame& frame);
@@ -1363,6 +1363,14 @@ size_t  __stdcall ScriptEnvironment::GetProperty(AvsEnvProperty prop)
 {
   switch(prop)
   {
+  case AEP_DEVICE_TYPE:
+    return currentDevice->device_type;
+  case AEP_DEVICE_ID:
+    return currentDevice->device_id;
+  case AEP_DEVICE_INDEX:
+    return currentDevice->device_index;
+  case AEP_NUM_DEVICES:
+    return DeviceManager.GetNumDevices();
   case AEP_FILTERCHAIN_THREADS:
     return nMaxFilterInstances;
   case AEP_PHYSICAL_CPUS:
@@ -1375,14 +1383,6 @@ size_t  __stdcall ScriptEnvironment::GetProperty(AvsEnvProperty prop)
     return thread_pool->NumThreads();
   case AEP_VERSION:
     return AVS_SEQREV;
-  case AEP_DEVICE_TYPE:
-    return currentDevice->device_type;
-  case AEP_DEVICE_ID:
-    return currentDevice->device_id;
-  case AEP_DEVICE_INDEX:
-    return currentDevice->device_index;
-  case AEP_NUM_DEVICES:
-    return DeviceManager.GetNumDevices();
   default:
     this->ThrowError("Invalid property request.");
     return std::numeric_limits<size_t>::max();
@@ -2224,29 +2224,38 @@ bool ScriptEnvironment::MakeWritable(PVideoFrame* pvf) {
   // Otherwise, allocate a new frame (using NewVideoFrame) and
   // copy the data into it.  Then modify the passed PVideoFrame
   // to point to the new buffer.
-  const int row_size = vf->GetRowSize();
-  const int height   = vf->GetHeight();
   Device* device = vf->GetFrameBuffer()->device;
   PVideoFrame dst;
 
-  bool alpha = 0 != vf->GetPitch(PLANAR_A);
-  if (vf->GetPitch(PLANAR_U)) {  // we have no videoinfo, so we assume that it is Planar if it has a U plane.
-    const int row_sizeUV = vf->GetRowSize(PLANAR_U); // for Planar RGB this returns row_sizeUV which is the same for all planes
-    const int heightUV   = vf->GetHeight(PLANAR_U);
-    dst = NewPlanarVideoFrame(row_size, height, row_sizeUV, heightUV, FRAME_ALIGN, false, alpha, device);  // Always V first on internal images
-  } else {
-    dst = NewVideoFrameOnDevice(row_size, height, FRAME_ALIGN, device);
+  if (device->device_type == DEV_TYPE_CUDA) {
+    // copy whole frame
+    dst = GetOnDeviceFrame(vf, device);
+    CopyCUDAFrame(dst, vf, this);
   }
+  else {
+    const int row_size = vf->GetRowSize();
+    const int height = vf->GetHeight();
 
-  BitBlt(dst->GetWritePtr(), dst->GetPitch(), vf->GetReadPtr(), vf->GetPitch(), row_size, height);
-  // Blit More planes (pitch, rowsize and height should be 0, if none is present)
-  BitBlt(dst->GetWritePtr(PLANAR_V), dst->GetPitch(PLANAR_V), vf->GetReadPtr(PLANAR_V),
-         vf->GetPitch(PLANAR_V), vf->GetRowSize(PLANAR_V), vf->GetHeight(PLANAR_V));
-  BitBlt(dst->GetWritePtr(PLANAR_U), dst->GetPitch(PLANAR_U), vf->GetReadPtr(PLANAR_U),
-         vf->GetPitch(PLANAR_U), vf->GetRowSize(PLANAR_U), vf->GetHeight(PLANAR_U));
-  if(alpha)
+    bool alpha = 0 != vf->GetPitch(PLANAR_A);
+    if (vf->GetPitch(PLANAR_U)) {  // we have no videoinfo, so we assume that it is Planar if it has a U plane.
+      const int row_sizeUV = vf->GetRowSize(PLANAR_U); // for Planar RGB this returns row_sizeUV which is the same for all planes
+      const int heightUV = vf->GetHeight(PLANAR_U);
+      dst = NewPlanarVideoFrame(row_size, height, row_sizeUV, heightUV, FRAME_ALIGN, false, alpha, device);  // Always V first on internal images
+    }
+    else {
+      dst = NewVideoFrameOnDevice(row_size, height, FRAME_ALIGN, device);
+    }
+
+    BitBlt(dst->GetWritePtr(), dst->GetPitch(), vf->GetReadPtr(), vf->GetPitch(), row_size, height);
+    // Blit More planes (pitch, rowsize and height should be 0, if none is present)
+    BitBlt(dst->GetWritePtr(PLANAR_V), dst->GetPitch(PLANAR_V), vf->GetReadPtr(PLANAR_V),
+      vf->GetPitch(PLANAR_V), vf->GetRowSize(PLANAR_V), vf->GetHeight(PLANAR_V));
+    BitBlt(dst->GetWritePtr(PLANAR_U), dst->GetPitch(PLANAR_U), vf->GetReadPtr(PLANAR_U),
+      vf->GetPitch(PLANAR_U), vf->GetRowSize(PLANAR_U), vf->GetHeight(PLANAR_U));
+    if (alpha)
       BitBlt(dst->GetWritePtr(PLANAR_A), dst->GetPitch(PLANAR_A), vf->GetReadPtr(PLANAR_A),
-          vf->GetPitch(PLANAR_A), vf->GetRowSize(PLANAR_A), vf->GetHeight(PLANAR_A));
+        vf->GetPitch(PLANAR_A), vf->GetRowSize(PLANAR_A), vf->GetHeight(PLANAR_A));
+  }
 
   // Copy properties
   dst->avsmap->data = vf->avsmap->data;
@@ -3278,7 +3287,7 @@ Device* ScriptEnvironment::SetCurrentDevice(Device* device)
 	return old;
 }
 
-PVideoFrame ScriptEnvironment::GetOnDeviceFrame(PVideoFrame& src, Device* device)
+PVideoFrame ScriptEnvironment::GetOnDeviceFrame(const PVideoFrame& src, Device* device)
 {
 	VideoFrame *res = GetNewFrame(src->GetFrameBuffer()->data_size, device);
 	res->offset = src->offset;

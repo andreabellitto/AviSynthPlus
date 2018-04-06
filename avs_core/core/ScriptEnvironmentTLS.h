@@ -376,14 +376,14 @@ public:
   {
     switch(prop)
     {
-    case AEP_THREAD_ID:
-      return thread_id;
     case AEP_DEVICE_TYPE:
       return currentDevice->device_type;
     case AEP_DEVICE_ID:
       return currentDevice->device_id;
     case AEP_DEVICE_INDEX:
       return currentDevice->device_index;
+    case AEP_THREAD_ID:
+      return thread_id;
     default:
       return core->GetProperty(prop);
     }
@@ -484,7 +484,7 @@ public:
 	  return core->NewVideoFrameOnDevice(vi, align, device);
   }
 
-  virtual PVideoFrame __stdcall GetOnDeviceFrame(PVideoFrame& src,  Device* device)
+  virtual PVideoFrame __stdcall GetOnDeviceFrame(const PVideoFrame& src,  Device* device)
   {
 	  return core->GetOnDeviceFrame(src, device);
   }

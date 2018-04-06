@@ -1,4 +1,4 @@
-// Avisynth v2.5.  Copyright 2002 Ben Rudiak-Gould et al.
+﻿// Avisynth v2.5.  Copyright 2002 Ben Rudiak-Gould et al.
 // http://www.avisynth.org
 
 // This program is free software; you can redistribute it and/or modify
@@ -43,7 +43,7 @@
 #include "version.h"
 
 #define AVS_CLASSIC_VERSION 2.60  // Note: Used by VersionNumber() script function
-#define AVS_COPYRIGHT "\n\xA9 2000-2015 Ben Rudiak-Gould, et al.\nhttp://avisynth.nl\n\xA9 2013-2016 AviSynth+ Project\nhttp://avs-plus.net"
+#define AVS_COPYRIGHT "\n(c) 2000-2015 Ben Rudiak-Gould, et al.\nhttp://avisynth.nl\n(c) 2013-2016 AviSynth+ Project\nhttp://avs-plus.net"
 #define BUILTIN_FUNC_PREFIX "AviSynth"
 
 enum MANAGE_CACHE_KEYS

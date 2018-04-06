@@ -65,3 +65,5 @@ public:
 
 void CheckChildDeviceTypes(const PClip& child, const char* name,
   const AVSValue& args, const char* const* argnames, IScriptEnvironment2* env);
+
+void CopyCUDAFrame(const PVideoFrame& dst, const PVideoFrame& src, IScriptEnvironment2* env);
