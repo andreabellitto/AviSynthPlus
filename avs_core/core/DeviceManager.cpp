@@ -862,7 +862,9 @@ public:
     // set upstream device
     upstreamDevice->SetActiveToCurrentThread(env);
 
-    if (prefetchFrames == 0) {
+
+    // do not use thread when invoke running
+    if (prefetchFrames == 0 || g_suppress_thread_count > 0) {
       return GetFrameImmediate(n, env);
     }
 
