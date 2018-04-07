@@ -1366,27 +1366,28 @@ AVSValue IsClip(AVSValue args, void*, IScriptEnvironment* env) { return args[0].
 AVSValue IsFunction(AVSValue args, void*, IScriptEnvironment* env) { return args[0].IsFunction(); }
 AVSValue Defined(AVSValue args, void*, IScriptEnvironment* env) { return args[0].Defined(); }
 
-AVSValue TypeName(AVSValue args, void*, IScriptEnvironment* env)
-{
-  if (args[0].IsClip())
+const char* GetAVSTypeName(AVSValue value) {
+  if (value.IsClip())
     return "clip";
-  else if (args[0].IsBool())
+  else if (value.IsBool())
     return "bool";
-  else if (args[0].IsInt())
+  else if (value.IsInt())
     return "int";
-  else if (args[0].IsFloat())
+  else if (value.IsFloat())
     return "float";
-  else if (args[0].IsString())
+  else if (value.IsString())
     return "string";
-  else if (args[0].IsArray())
+  else if (value.IsArray())
     return "array";
-  else if (args[0].IsFunction())
+  else if (value.IsFunction())
     return "function";
-  else if (!args[0].Defined())
+  else if (!value.Defined())
     return "undefined value";
   else
     return "unknown type";
 }
+
+AVSValue TypeName(AVSValue args, void*, IScriptEnvironment* env) { return GetAVSTypeName(args[0]); }
 
 AVSValue Default(AVSValue args, void*, IScriptEnvironment* env) { return args[0].Defined() ? args[0] : args[1]; }
 AVSValue VersionNumber(AVSValue args, void*, IScriptEnvironment* env) { return AVS_CLASSIC_VERSION; }

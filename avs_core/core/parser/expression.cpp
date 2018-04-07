@@ -530,10 +530,9 @@ AVSValue ExpFunctionCall::Evaluate(IScriptEnvironment* env)
     // if name is not given, evaluate expression to get the function 
     eval_result = func->Evaluate(env);
     if (!eval_result.IsFunction()) {
-      if (eval_result.IsClip())
-        env->ThrowError(
-          "Script error: '%s' cannot be called. Give me a function!",
-          TypeName(eval_result, nullptr, env));
+      env->ThrowError(
+        "Script error: '%s' cannot be called. Give me a function!",
+        GetAVSTypeName(eval_result));
     }
     auto& func = eval_result.AsFunction();
     real_name = func->GetLegacyName();

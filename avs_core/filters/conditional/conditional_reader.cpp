@@ -790,7 +790,7 @@ PVideoFrame __stdcall AddProp::GetFrame(int n, IScriptEnvironment* env)
    else if (result.IsFloat())
       frame->SetProperty(name, result.AsFloat());
    else 
-      env->ThrowError("AddProp: Invalid return type (Was a %s)", TypeName(result, nullptr, env));
+      env->ThrowError("AddProp: Invalid return type (Was a %s)", GetAVSTypeName(result));
 
    return frame;
 }

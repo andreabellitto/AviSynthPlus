@@ -293,8 +293,9 @@ Crop::Crop(int _left, int _top, int _width, int _height, bool _align, PClip _chi
 }
 
 
-PVideoFrame Crop::GetFrame(int n, IScriptEnvironment* env) 
+PVideoFrame Crop::GetFrame(int n, IScriptEnvironment* env_)
 {
+  IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
   PVideoFrame frame = child->GetFrame(n, env);
 
   int plane0 = isRGBPfamily ? PLANAR_G : PLANAR_Y;
@@ -312,7 +313,8 @@ PVideoFrame Crop::GetFrame(int n, IScriptEnvironment* env)
   else
     _align = this->align & (size_t)srcp0;
 
-  if (0 != _align) {
+  // Ignore alignment for CUDA. Clip should be explicitly aligned by Aling()
+  if (0 != _align && (env->GetProperty(AEP_DEVICE_TYPE) == DEV_TYPE_CPU)) {
     PVideoFrame dst = env->NewVideoFrame(vi, (int)align+1);
 
     env->BitBlt(dst->GetWritePtr(plane0), dst->GetPitch(plane0), srcp0,
@@ -349,6 +351,16 @@ PVideoFrame Crop::GetFrame(int n, IScriptEnvironment* env)
         frame->GetPitch(plane1));
     }
   }
+}
+
+int __stdcall Crop::SetCacheHints(int cachehints, int frame_range) {
+  switch (cachehints) {
+  case CACHE_GET_MTMODE:
+    return MT_NICE_FILTER;
+  case CACHE_GET_DEV_TYPE:
+    return GetDeviceTypes(child) & (DEV_TYPE_CPU | DEV_TYPE_CUDA);
+  }
+  return 0;
 }
 
 

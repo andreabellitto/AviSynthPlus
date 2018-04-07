@@ -358,7 +358,7 @@ struct AVS_Linkage {
   double          (AVSMapValue::*AVSMapValue_GetFloat)() const;
   // end class AVSMapValue
 
-  void            (AVSValue::*AVSValue_CONSTRUCTOR11)(IFunction* o);
+  void            (AVSValue::*AVSValue_CONSTRUCTOR11)(const PFunction& o);
   bool            (AVSValue::*IsFunction)() const;
 
   /**********************************************************************/
@@ -1106,7 +1106,7 @@ public:
   AVSValue(const AVSValue* a, int size) AVS_BakedCode( AVS_LinkCall_Void(AVSValue_CONSTRUCTOR8)(a, size) )
   AVSValue(const AVSValue& a, int size) AVS_BakedCode( AVS_LinkCall_Void(AVSValue_CONSTRUCTOR8)(&a, size) )
   AVSValue(const AVSValue& v) AVS_BakedCode( AVS_LinkCall_Void(AVSValue_CONSTRUCTOR9)(v) )
-  AVSValue(const PFunction& n) AVS_BakedCode(AVS_LinkCall_Void(AVSValue_CONSTRUCTOR11)(c))
+  AVSValue(const PFunction& n) AVS_BakedCode(AVS_LinkCall_Void(AVSValue_CONSTRUCTOR11)(n))
 
   ~AVSValue() AVS_BakedCode( AVS_LinkCall_Void(AVSValue_DESTRUCTOR)() )
   AVSValue& operator=(const AVSValue& v) AVS_BakedCode( return AVS_LinkCallV(AVSValue_OPERATOR_ASSIGN)(v) )
@@ -1379,7 +1379,8 @@ enum AvsEnvProperty
   AEP_DEVICE_TYPE = 7,
   AEP_DEVICE_ID = 8,
   AEP_DEVICE_INDEX = 9,
-  AEP_NUM_DEVICES = 10
+  AEP_NUM_DEVICES = 10,
+  AEP_FRAME_ALIGN = 11
 };
 
 enum AvsAllocType
