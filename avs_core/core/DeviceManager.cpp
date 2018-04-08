@@ -207,7 +207,8 @@ public:
     if (initialized.load(std::memory_order_acquire) == false) {
       std::lock_guard<std::mutex> lock(mutex);
       if (initialized.load(std::memory_order_relaxed) == false) {
-        cuda_enabled = (onDeviceCount[DEV_TYPE_CUDA] > 0);
+        //cuda_enabled = (onDeviceCount[DEV_TYPE_CUDA] > 0);
+        cuda_enabled = false;
         initialized.store(true, std::memory_order_release);
       }
     }

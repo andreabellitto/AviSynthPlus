@@ -2052,8 +2052,8 @@ PVideoFrame ScriptEnvironment::NewPlanarVideoFrame(int row_size, int height, int
 
   size_t size = pitchY * height + 2 * pitchUV * heightUV + (alpha ? pitchY * height : 0);
   
-  // why we need this??
-  //size = size + align -1;
+  // make space for alignment
+  size = size + align -1;
 
   VideoFrame *res = GetNewFrame(size, device);
 
@@ -2101,8 +2101,8 @@ PVideoFrame ScriptEnvironment::NewVideoFrameOnDevice(int row_size, int height, i
   const int pitch = AlignNumber(row_size, align);
   size_t size = pitch * height;
 
-  // why we need this??
-  //size = size + align -1;
+  // make space for alignment
+  size = size + align -1;
 
   VideoFrame *res = GetNewFrame(size, device);
 

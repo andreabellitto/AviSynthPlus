@@ -586,6 +586,24 @@ bool VideoFrame::DeleteProperty(const char* key) {
 	return (avsmap->data.erase(key) > 0);
 }
 
+int VideoFrame::CheckMemory() const {
+#ifdef _DEBUG
+  if (vfb->data && vfb->device->device_type == DEV_TYPE_CPU) {
+    // check buffer overrun
+    int *pInt = (int *)(vfb->data + vfb->data_size);
+    if (pInt[0] != 0xDEADBEEF ||
+      pInt[1] != 0xDEADBEEF ||
+      pInt[2] != 0xDEADBEEF ||
+      pInt[3] != 0xDEADBEEF)
+    {
+      return 1;
+    }
+    return 0;
+  }
+#endif
+  return -1;
+}
+
 /* Baked ********************
 VideoFrame::~VideoFrame() { InterlockedDecrement(&vfb->refcount); }
    Baked ********************/
@@ -1350,6 +1368,8 @@ static const AVS_Linkage avs_linkage = {    // struct AVS_Linkage {
   &PDevice::GetIndex,
   &PDevice::GetName,
   // end class PDevice
+
+  &VideoFrame::CheckMemory,
 
 // this part should be identical with struct AVS_Linkage in avisynth.h
 
