@@ -74,7 +74,7 @@ std::string DeviceTypesString(int devicetypes)
   return oss.str();
 }
 
-static void CheckDeviceTypes(const char* name, int devicetypes, const AVSValue& arr, IScriptEnvironment2* env)
+static void CheckDeviceTypes(const char* name, int devicetypes, const AVSValue& arr, InternalEnvironment* env)
 {
   for (int i = 0; i < arr.ArraySize(); ++i) {
     const AVSValue& val = arr[i];
@@ -94,7 +94,7 @@ static void CheckDeviceTypes(const char* name, int devicetypes, const AVSValue& 
   }
 }
 
-void CheckChildDeviceTypes(const PClip& clip, const char* name, const AVSValue& args, const char* const* argnames, IScriptEnvironment2* env)
+void CheckChildDeviceTypes(const PClip& clip, const char* name, const AVSValue& args, const char* const* argnames, InternalEnvironment* env)
 {
   int deviceflags = GetTargetDeviceTypes(clip);
   if (args.IsArray()) {
@@ -375,7 +375,7 @@ DeviceManager::DeviceManager(InternalEnvironment* env) :
   numDevices = next_device_id;
 }
 
-Device* DeviceManager::GetDevice(int device_type, int device_index)
+Device* DeviceManager::GetDevice(AvsDeviceType device_type, int device_index) const
 {
   switch (device_type) {
 
@@ -1027,9 +1027,9 @@ public:
 
     switch (upstreamType) {
     case DEV_TYPE_CPU:
-      return new OnDevice(clip, numPrefetch, env->GetDevice(DEV_TYPE_CPU, 0), env);
+      return new OnDevice(clip, numPrefetch, (Device*)(void*)env->GetDevice(DEV_TYPE_CPU, 0), env);
     case DEV_TYPE_CUDA:
-      return new OnDevice(clip, numPrefetch, env->GetDevice(DEV_TYPE_CUDA, upstreamIndex), env);
+      return new OnDevice(clip, numPrefetch, (Device*)(void*)env->GetDevice(DEV_TYPE_CUDA, upstreamIndex), env);
     }
 
     env->ThrowError("Not supported device ...");
@@ -1047,10 +1047,10 @@ public:
      Device* upstreamDevice = nullptr;
      switch (upstreamType) {
      case DEV_TYPE_CPU:
-        upstreamDevice = env->GetDevice(DEV_TYPE_CPU, 0);
+        upstreamDevice = (Device*)(void*)env->GetDevice(DEV_TYPE_CPU, 0);
         break;
      case DEV_TYPE_CUDA:
-        upstreamDevice = env->GetDevice(DEV_TYPE_CUDA, upstreamIndex);
+        upstreamDevice = (Device*)(void*)env->GetDevice(DEV_TYPE_CUDA, upstreamIndex);
         break;
      default:
         env->ThrowError("Not supported device ...");
@@ -1077,7 +1077,7 @@ public:
   }
 };
 
-void CopyCUDAFrame(const PVideoFrame& dst, const PVideoFrame& src, IScriptEnvironment2* env)
+void CopyCUDAFrame(const PVideoFrame& dst, const PVideoFrame& src, InternalEnvironment* env)
 {
   VideoFrameBuffer* srcvfb = src->GetFrameBuffer();
   VideoFrameBuffer* dstvfb = dst->GetFrameBuffer();

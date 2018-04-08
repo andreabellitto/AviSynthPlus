@@ -49,6 +49,7 @@
 
 #include <avisynth.h>
 #include <avs/win.h>
+#include "InternalEnvironment.h"
 #include "DeviceManager.h"
 #include "AVSMap.h"
 #include "function.h"
@@ -581,6 +582,10 @@ const AVSMapValue* VideoFrame::GetProperty(const char* key) const {
   return &it->second;
 }
 
+bool VideoFrame::DeleteProperty(const char* key) {
+	return (avsmap->data.erase(key) > 0);
+}
+
 /* Baked ********************
 VideoFrame::~VideoFrame() { InterlockedDecrement(&vfb->refcount); }
    Baked ********************/
@@ -998,6 +1003,57 @@ double AVSMapValue::GetFloat() const { return value.d; }
 
 // end class AVSMapValue
 
+PFunction::PFunction() { CONSTRUCTOR0(); }
+void PFunction::CONSTRUCTOR0() { Init(0); }
+
+PFunction::PFunction(IFunction* p) { CONSTRUCTOR1(p); }
+void PFunction::CONSTRUCTOR1(IFunction* p) { Init(p); }
+
+PFunction::PFunction(const PFunction& p) { CONSTRUCTOR2(p); }
+void PFunction::CONSTRUCTOR2(const PFunction& p) { Init(p.e); }
+
+PFunction& PFunction::operator=(IFunction* p) { return OPERATOR_ASSIGN0(p); }
+PFunction& PFunction::OPERATOR_ASSIGN0(IFunction* p) { Set(p); return *this; }
+
+PFunction& PFunction::operator=(const PFunction& p) { return OPERATOR_ASSIGN1(p); }
+PFunction& PFunction::OPERATOR_ASSIGN1(const PFunction& p) { Set(p.e); return *this; }
+
+PFunction::~PFunction() { DESTRUCTOR(); }
+void PFunction::DESTRUCTOR() { if (e) e->Release(); }
+
+IFunction * PFunction::GetPointerWithAddRef() const { if (e) e->AddRef(); return e; }
+void PFunction::Init(IFunction* p) { e = p; if (e) e->AddRef(); }
+void PFunction::Set(IFunction* p) { if (p) p->AddRef(); if (e) e->Release(); e = p; }
+
+PDevice::PDevice() { CONSTRUCTOR0(); }
+void PDevice::CONSTRUCTOR0() { e = 0; }
+
+PDevice::PDevice(Device* p) { CONSTRUCTOR1(p); }
+void PDevice::CONSTRUCTOR1(Device* p) { e = p; }
+
+PDevice::PDevice(const PDevice& p) { CONSTRUCTOR2(p); }
+void PDevice::CONSTRUCTOR2(const PDevice& p) { e = p.e; }
+
+PDevice& PDevice::operator=(Device* p) { return OPERATOR_ASSIGN0(p); }
+PDevice& PDevice::OPERATOR_ASSIGN0(Device* p) { e = p; return *this; }
+
+PDevice& PDevice::operator=(const PDevice& p) { return OPERATOR_ASSIGN1(p); }
+PDevice& PDevice::OPERATOR_ASSIGN1(const PDevice& p) { e = p.e; return *this; }
+
+PDevice::~PDevice() { }
+void PDevice::DESTRUCTOR() { }
+
+AvsDeviceType PDevice::GetType() const { return e ? e->device_type : DEV_TYPE_NONE; }
+int PDevice::GetId() const { return e ? e->device_id : -1; }
+int PDevice::GetIndex() const { return e ? e->device_index : -1; }
+const char* PDevice::GetName() const { return e ? e->GetName() : nullptr; }
+
+
+INeoEnv* __stdcall GetAvsEnv(IScriptEnvironment* env) { return static_cast<InternalEnvironment*>(env); }
+
+PNeoEnv::PNeoEnv(IScriptEnvironment* env) : p(static_cast<InternalEnvironment*>(env)) { }
+PNeoEnv::operator IScriptEnvironment2 *() { return static_cast<InternalEnvironment*>(p); }
+
 /**********************************************************************/
 
 static const AVS_Linkage avs_linkage = {    // struct AVS_Linkage {
@@ -1209,10 +1265,45 @@ static const AVS_Linkage avs_linkage = {    // struct AVS_Linkage {
   NULL,                                     //   reserved for AviSynth+
   NULL,                                     //   reserved for AviSynth+
   NULL,                                     //   reserved for AviSynth+
+    
+  NULL,                                     //   reserved for AviSynth+
+  NULL,                                     //   reserved for AviSynth+
+  NULL,                                     //   reserved for AviSynth+
+  NULL,                                     //   reserved for AviSynth+
+  NULL,                                     //   reserved for AviSynth+
+  NULL,                                     //   reserved for AviSynth+
+  NULL,                                     //   reserved for AviSynth+
+  NULL,                                     //   reserved for AviSynth+
+  NULL,                                     //   reserved for AviSynth+
+  NULL,                                     //   reserved for AviSynth+
+  NULL,                                     //   reserved for AviSynth+
+  NULL,                                     //   reserved for AviSynth+
+  NULL,                                     //   reserved for AviSynth+
+  NULL,                                     //   reserved for AviSynth+
+  NULL,                                     //   reserved for AviSynth+
+  NULL,                                     //   reserved for AviSynth+
+  NULL,                                     //   reserved for AviSynth+
+  NULL,                                     //   reserved for AviSynth+
+  NULL,                                     //   reserved for AviSynth+
+  NULL,                                     //   reserved for AviSynth+
+  NULL,                                     //   reserved for AviSynth+
+  NULL,                                     //   reserved for AviSynth+
+  NULL,                                     //   reserved for AviSynth+
+  NULL,                                     //   reserved for AviSynth+
+  NULL,                                     //   reserved for AviSynth+
+  NULL,                                     //   reserved for AviSynth+
+  NULL,                                     //   reserved for AviSynth+
+  NULL,                                     //   reserved for AviSynth+
+  NULL,                                     //   reserved for AviSynth+
+  NULL,                                     //   reserved for AviSynth+
+  NULL,                                     //   reserved for AviSynth+
+  NULL,                                     //   reserved for AviSynth+
 /**********************************************************************/
   // AviSynth+CUDA additions
+  &GetAvsEnv,
   &VideoFrame::SetProperty,
   &VideoFrame::GetProperty,
+  &VideoFrame::DeleteProperty,
 
   // class AVSMapValue
   &AVSMapValue::CONSTRUCTOR0,
@@ -1228,6 +1319,31 @@ static const AVS_Linkage avs_linkage = {    // struct AVS_Linkage {
   &AVSMapValue::GetFrame,
   &AVSMapValue::GetInt,
   &AVSMapValue::GetFloat,
+  // end class AVSMapValue
+
+  // PFunction
+  &AVSValue::CONSTRUCTOR11,
+  &AVSValue::IsFunction,
+  &PFunction::CONSTRUCTOR0,
+  &PFunction::CONSTRUCTOR1,
+  &PFunction::CONSTRUCTOR2,
+  &PFunction::OPERATOR_ASSIGN0,
+  &PFunction::OPERATOR_ASSIGN1,
+  &PFunction::DESTRUCTOR,
+  // end PFunction
+
+  // class PDevice
+  &PDevice::CONSTRUCTOR0,
+  &PDevice::CONSTRUCTOR1,
+  &PDevice::CONSTRUCTOR2,
+  &PDevice::OPERATOR_ASSIGN0,
+  &PDevice::OPERATOR_ASSIGN1,
+  &PDevice::DESTRUCTOR,
+  &PDevice::GetType,
+  &PDevice::GetId,
+  &PDevice::GetIndex,
+  &PDevice::GetName,
+  // end class PDevice
 
 // this part should be identical with struct AVS_Linkage in avisynth.h
 

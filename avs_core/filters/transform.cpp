@@ -295,7 +295,7 @@ Crop::Crop(int _left, int _top, int _width, int _height, bool _align, PClip _chi
 
 PVideoFrame Crop::GetFrame(int n, IScriptEnvironment* env_)
 {
-  IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
+  InternalEnvironment* env = static_cast<InternalEnvironment*>(env_);
   PVideoFrame frame = child->GetFrame(n, env);
 
   int plane0 = isRGBPfamily ? PLANAR_G : PLANAR_Y;
@@ -314,8 +314,8 @@ PVideoFrame Crop::GetFrame(int n, IScriptEnvironment* env_)
     _align = this->align & (size_t)srcp0;
 
   // Ignore alignment for CUDA. Clip should be explicitly aligned by Aling()
-  if (0 != _align && (env->GetProperty(AEP_DEVICE_TYPE) == DEV_TYPE_CPU)) {
-    PVideoFrame dst = env->NewVideoFrame(vi, (int)align+1);
+  if (0 != _align && (env->GetDeviceType() == DEV_TYPE_CPU)) {
+    PVideoFrame dst = static_cast<IScriptEnvironment*>(env)->NewVideoFrame(vi, (int)align+1);
 
     env->BitBlt(dst->GetWritePtr(plane0), dst->GetPitch(plane0), srcp0,
       frame->GetPitch(plane0), dst->GetRowSize(plane0), dst->GetHeight(plane0));

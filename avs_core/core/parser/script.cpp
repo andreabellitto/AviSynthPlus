@@ -202,7 +202,7 @@ extern const AVSFunction Script_functions[] = {
   { "Assert", BUILTIN_FUNC_PREFIX, "b[message]s", Assert },
   { "Assert", BUILTIN_FUNC_PREFIX, "s", AssertEval },
 
-  { "SetMemoryMax", BUILTIN_FUNC_PREFIX, "[]i[type]i[index]i", SetDeviceMemoryMax },
+  { "SetMemoryMax", BUILTIN_FUNC_PREFIX, "[]i[type]i[index]i", SetMemoryMax },
 
   { "SetWorkingDir", BUILTIN_FUNC_PREFIX, "s", SetWorkingDir },
   { "Exist",         BUILTIN_FUNC_PREFIX, "s", Exist },
@@ -581,7 +581,6 @@ AVSValue ScriptNameUtf8(AVSValue args, void*, IScriptEnvironment* env) { return 
 AVSValue ScriptFileUtf8(AVSValue args, void*, IScriptEnvironment* env) { return env->GetVarDef("$ScriptFileUtf8$"); }
 AVSValue ScriptDirUtf8(AVSValue args, void*, IScriptEnvironment* env) { return env->GetVarDef("$ScriptDirUtf8$"); }
 
-AVSValue SetMemoryMax(AVSValue args, void*, IScriptEnvironment* env) { return env->SetMemoryMax(args[0].AsInt(0)); }
 AVSValue SetWorkingDir(AVSValue args, void*, IScriptEnvironment* env) { return env->SetWorkingDir(args[0].AsString()); }
 
 AVSValue Muldiv(AVSValue args, void*, IScriptEnvironment* env) { return int(MulDiv(args[0].AsInt(), args[1].AsInt(), args[2].AsInt())); }
@@ -1568,7 +1567,7 @@ AVSValue SetCacheMode(AVSValue args, void*, IScriptEnvironment* env)
 	return AVSValue();
 }
 
-AVSValue SetDeviceMemoryMax(AVSValue args, void*, IScriptEnvironment* env)
+AVSValue SetMemoryMax(AVSValue args, void*, IScriptEnvironment* env)
 {
   int memMax = args[0].AsInt(0);
   int deviceType = args[1].AsInt(0);
@@ -1579,7 +1578,7 @@ AVSValue SetDeviceMemoryMax(AVSValue args, void*, IScriptEnvironment* env)
   }
 
   InternalEnvironment *env2 = static_cast<InternalEnvironment*>(env);
-  return env2->SetDeviceMemoryMax((AvsDeviceType)deviceType, deviceIndex, memMax);
+  return env2->SetMemoryMax((AvsDeviceType)deviceType, deviceIndex, memMax);
 }
 
 AVSValue IsY(AVSValue args, void*, IScriptEnvironment* env) { return VI(args[0]).IsY(); }

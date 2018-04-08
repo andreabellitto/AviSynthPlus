@@ -528,7 +528,7 @@ PVideoFrame __stdcall ConditionalReader::GetFrame(int n, IScriptEnvironment* env
 {
   AVSValue v = GetFrameValue(n);
 
-  GlobalVarFrame var_frame(static_cast<IScriptEnvironment2*>(env)); // allocate new frame
+  GlobalVarFrame var_frame(static_cast<InternalEnvironment*>(env)); // allocate new frame
   env->SetGlobalVar(variableName, v);
 
   PVideoFrame src = child->GetFrame(n,env);
@@ -589,7 +589,7 @@ Write::Write (PClip _child, const char* _filename, AVSValue args, int _linecheck
 		arglist[i].string = EMPTY;
 	}
 
-   GlobalVarFrame var_frame(static_cast<IScriptEnvironment2*>(env)); // allocate new frame
+   GlobalVarFrame var_frame(static_cast<InternalEnvironment*>(env)); // allocate new frame
 
 	if (linecheck == -1) {	//write at start
 		env->SetGlobalVar("last", (AVSValue)child);       // Set implicit last
@@ -615,7 +615,7 @@ PVideoFrame __stdcall Write::GetFrame(int n, IScriptEnvironment* env) {
 
 	if (linecheck<0) return tmpframe;	//do nothing here when writing only start or end
 
-   GlobalVarFrame var_frame(static_cast<IScriptEnvironment2*>(env)); // allocate new frame
+   GlobalVarFrame var_frame(static_cast<InternalEnvironment*>(env)); // allocate new frame
 	env->SetGlobalVar("last",(AVSValue)child);       // Set implicit last (to avoid recursive stack calls?)
 	env->SetGlobalVar("current_frame",n);
 	
@@ -737,7 +737,7 @@ UseVar::~UseVar() { }
 
 PVideoFrame __stdcall UseVar::GetFrame(int n, IScriptEnvironment* env)
 {
-   GlobalVarFrame var_frame(static_cast<IScriptEnvironment2*>(env)); // allocate new frame
+   GlobalVarFrame var_frame(static_cast<InternalEnvironment*>(env)); // allocate new frame
 
    // set variables
    for (int i = 0; i < (int)vars_.size(); ++i) {
@@ -774,7 +774,7 @@ AddProp::~AddProp() { }
 
 PVideoFrame __stdcall AddProp::GetFrame(int n, IScriptEnvironment* env)
 {
-   GlobalVarFrame var_frame(static_cast<IScriptEnvironment2*>(env)); // allocate new frame
+   GlobalVarFrame var_frame(static_cast<InternalEnvironment*>(env)); // allocate new frame
    env->SetGlobalVar("last", (AVSValue)child);       // Set implicit last
    env->SetGlobalVar("current_frame", (AVSValue)n);  // Set frame to be tested
 

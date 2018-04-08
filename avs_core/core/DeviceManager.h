@@ -17,14 +17,14 @@ protected:
     InternalEnvironment* env;
 
 public:
-    const int device_type;
+    const AvsDeviceType device_type;
     const int device_id;
     const int device_index;
 
     unsigned __int64 memory_max;
     std::atomic<unsigned __int64> memory_used;
 
-    Device(int type, int id, int index, InternalEnvironment* env) :
+    Device(AvsDeviceType type, int id, int index, InternalEnvironment* env) :
 		  env(env),
       device_type(type),
       device_id(id),
@@ -56,7 +56,7 @@ public:
     DeviceManager(InternalEnvironment* env);
     ~DeviceManager() { }
 
-    Device* GetDevice(int device_type, int device_index);
+    Device* GetDevice(AvsDeviceType device_type, int device_index) const;
 
     Device* GetCPUDevice() { return GetDevice(DEV_TYPE_CPU, 0); }
 
@@ -64,6 +64,6 @@ public:
 };
 
 void CheckChildDeviceTypes(const PClip& child, const char* name,
-  const AVSValue& args, const char* const* argnames, IScriptEnvironment2* env);
+  const AVSValue& args, const char* const* argnames, InternalEnvironment* env);
 
-void CopyCUDAFrame(const PVideoFrame& dst, const PVideoFrame& src, IScriptEnvironment2* env);
+void CopyCUDAFrame(const PVideoFrame& dst, const PVideoFrame& src, InternalEnvironment* env);

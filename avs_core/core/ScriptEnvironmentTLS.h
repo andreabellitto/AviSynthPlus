@@ -26,11 +26,11 @@ private:
   Device* currentDevice;
   volatile long refcount;
 
-	~ScriptEnvironmentTLS()
-	{
-      var_table.Clear();
-		env_->DecEnvCount(); // for leak detection
-	}
+  ~ScriptEnvironmentTLS()
+  {
+    var_table.Clear();
+    env_->DecEnvCount(); // for leak detection
+  }
 
 public:
   ScriptEnvironmentTLS(size_t _thread_id, InternalEnvironment* env) :
@@ -48,7 +48,7 @@ public:
   void Specialize(InternalEnvironment* _core, Device* _device)
   {
     core = _core->GetCoreEnvironment();
-	currentDevice = _device;
+	  currentDevice = _device;
   }
 
   /* ---------------------------------------------------------------------------------
@@ -157,7 +157,7 @@ public:
     BufferPool.Free(ptr);
   }
 
-  virtual Device* __stdcall GetCurrentDevice()
+  virtual Device* __stdcall GetCurrentDevice() const
   {
 	  CHECK_THREAD;
 	  return currentDevice;
@@ -271,6 +271,20 @@ public:
 		return result;
   }
 
+  AVSValue __stdcall Invoke(const PFunction& func, const AVSValue args, const char* const* arg_names = 0)
+  {
+    AVSValue result;
+    if (!core->InvokeThread(&result, func->GetLegacyName(), func->GetDefinition(), args, arg_names, this)) {
+      throw NotFound();
+    }
+    return result;
+  }
+
+  bool __stdcall Invoke(AVSValue *result, const PFunction& func, const AVSValue args, const char* const* arg_names = 0)
+  {
+    return core->InvokeThread(result, func->GetLegacyName(), func->GetDefinition(), args, arg_names, this);
+  }
+
   bool __stdcall MakeWritable(PVideoFrame* pvf)
   {
     return core->MakeWritable(pvf);
@@ -326,7 +340,7 @@ public:
     core->ApplyMessage(frame, vi, message, size, textcolor, halocolor, bgcolor);
   }
 
-  const AVS_Linkage* const __stdcall GetAVSLinkage()
+  const AVS_Linkage* __stdcall GetAVSLinkage()
   {
     return core->GetAVSLinkage();
   }
@@ -376,12 +390,6 @@ public:
   {
     switch(prop)
     {
-    case AEP_DEVICE_TYPE:
-      return currentDevice->device_type;
-    case AEP_DEVICE_ID:
-      return currentDevice->device_id;
-    case AEP_DEVICE_INDEX:
-      return currentDevice->device_index;
     case AEP_THREAD_ID:
       return thread_id;
     default:
@@ -411,7 +419,12 @@ public:
 
   virtual void __stdcall ParallelJob(ThreadWorkerFuncPtr jobFunc, void* jobData, IJobCompletion* completion)
   {
-		core->GetThreadPool()->QueueJob(jobFunc, jobData, this, static_cast<JobCompletion*>(completion));
+		core->ParallelJob(jobFunc, jobData, completion, this);
+  }
+
+  virtual void __stdcall ParallelJob(ThreadWorkerFuncPtr jobFunc, void* jobData, IJobCompletion* completion, InternalEnvironment *env)
+  {
+    core->ParallelJob(jobFunc, jobData, completion, env);
   }
 
   virtual ClipDataStore* __stdcall ClipData(IClip *clip)
@@ -464,19 +477,44 @@ public:
 	  return core->GetCoreEnvironment();
   }
 
-	virtual ThreadPool* __stdcall GetThreadPool()
-	{
-		return core->GetThreadPool();
-	}
-
-  virtual int __stdcall SetDeviceMemoryMax(AvsDeviceType type, int index, int mem)
+  virtual int __stdcall SetMemoryMax(AvsDeviceType type, int index, int mem)
   {
-      return core->SetDeviceMemoryMax(type, index, mem);
+      return core->SetMemoryMax(type, index, mem);
   }
 
-  virtual Device* __stdcall GetDevice(int device_type, int device_index)
+  virtual PDevice __stdcall GetDevice(AvsDeviceType device_type, int device_index) const
   {
 	  return core->GetDevice(device_type, device_index);
+  }
+
+  virtual PDevice __stdcall GetDevice() const
+  {
+    CHECK_THREAD;
+    return currentDevice;
+  }
+
+  virtual AvsDeviceType __stdcall GetDeviceType() const
+  {
+    CHECK_THREAD;
+    return currentDevice->device_type;
+  }
+
+  virtual int __stdcall GetDeviceId() const
+  {
+    CHECK_THREAD;
+    return currentDevice->device_id;
+  }
+
+  virtual int __stdcall GetDeviceIndex() const
+  {
+    CHECK_THREAD;
+    return currentDevice->device_index;
+  }
+
+  virtual void* __stdcall GetDeviceStream() const
+  {
+    CHECK_THREAD;
+    return currentDevice->GetComputeStream();;
   }
 
   PVideoFrame __stdcall NewVideoFrameOnDevice(const VideoInfo& vi, int align, Device* device)
@@ -484,12 +522,22 @@ public:
 	  return core->NewVideoFrameOnDevice(vi, align, device);
   }
 
+  virtual PVideoFrame __stdcall NewVideoFrame(const VideoInfo& vi)
+  {
+    return NewVideoFrameOnDevice(vi, FRAME_ALIGN, currentDevice);
+  }
+
+  virtual PVideoFrame __stdcall NewVideoFrame(const VideoInfo& vi, const PDevice& device)
+  {
+    return NewVideoFrameOnDevice(vi, FRAME_ALIGN, (Device*)(void*)device);
+  }
+
   virtual PVideoFrame __stdcall GetOnDeviceFrame(const PVideoFrame& src,  Device* device)
   {
 	  return core->GetOnDeviceFrame(src, device);
   }
 
-  virtual void __stdcall CopyFrameProps(PVideoFrame src, PVideoFrame dst)
+  virtual void __stdcall CopyFrameProps(PVideoFrame src, PVideoFrame dst) const
   {
     core->CopyFrameProps(src, dst);
   }
@@ -505,7 +553,7 @@ public:
   }
 
 	virtual bool __stdcall InvokeThread(AVSValue* result, const char* name, const Function* func, const AVSValue& args,
-		const char* const* arg_names, IScriptEnvironment2* env)
+		const char* const* arg_names, InternalEnvironment* env)
 	{
 		return core->InvokeThread(result, name, func, args, arg_names, env);
 	}
