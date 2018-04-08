@@ -26,9 +26,9 @@ public:
 private:
   friend class PFunction;
   friend class AVSValue;
-  int refcnt;
-  void AddRef() { ++refcnt; }
-  void Release() { if (--refcnt <= 0) delete this; }
+  unsigned long refcnt;
+  void AddRef();
+  void Release();
 };
 
 

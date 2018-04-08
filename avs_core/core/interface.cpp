@@ -749,6 +749,8 @@ void AVSValue::DESTRUCTOR()
 {
   if (IsClip() && clip)
     clip->Release();
+  if (IsFunction() && function)
+    function->Release();
 }
 #else
 AVSValue::~AVSValue()                                    { DESTRUCTOR(); }
@@ -756,6 +758,8 @@ void AVSValue::DESTRUCTOR()
 {
   if (IsClip() && clip)
     clip->Release();
+  if (IsFunction() && function)
+    function->Release();
   if (IsArray() && array_size>0) {
     // array_size < 0: marked as C array internally, don't free elements
     delete[] array; // calls AVSValue destructors for all elements
@@ -866,6 +870,8 @@ void AVSValue::Assign2(const AVSValue* src, bool init, bool c_arrays) {
     // don't free array members!
     if (!init && IsClip() && clip)
       clip->Release();
+    if (!init && IsFunction() && function)
+      function->Release();
 
     this->type = src->type;
     this->array_size = src->array_size;

@@ -26,6 +26,16 @@ const char RegPluginDirPlus[] = "PluginDir+";
 ---------------------------------------------------------------------------------
 */
 
+void IFunction::AddRef() {
+  InterlockedIncrement(&refcnt);
+}
+
+void IFunction::Release() {
+  if (InterlockedDecrement(&refcnt) <= 0)
+    delete this;
+}
+
+
 // Translates a Windows error code to a human-readable text message.
 static std::string GetLastErrorText(DWORD nErrorCode)
 {
