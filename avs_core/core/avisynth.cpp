@@ -396,6 +396,19 @@ VideoFrameBuffer::VideoFrameBuffer(int size, Device* device) :
 VideoFrameBuffer::~VideoFrameBuffer() {
 //  _ASSERTE(refcount == 0);
   InterlockedIncrement(&sequence_number); // HACK : Notify any children with a pointer, this buffer has changed!!!
+#ifdef _DEBUG
+  if (data && device->device_type == DEV_TYPE_CPU) {
+    // check buffer overrun
+    int *pInt = (int *)(data + data_size);
+    if (pInt[0] != 0xDEADBEEF ||
+      pInt[1] != 0xDEADBEEF ||
+      pInt[2] != 0xDEADBEEF ||
+      pInt[3] != 0xDEADBEEF) 
+    {
+      printf("Buffer overrun!!!\n");
+    }
+  }
+#endif
   if (data) device->Free(data);
   data = nullptr; // and mark it invalid!!
   data_size = 0;   // and don't forget to set the size to 0 as well!

@@ -106,8 +106,13 @@ void CheckChildDeviceTypes(const PClip& clip, const char* name, const AVSValue& 
 }
 
 class CPUDevice : public Device {
+protected:
+  int onDeviceCount[4];
 public:
-  CPUDevice(InternalEnvironment* env) : Device(DEV_TYPE_CPU, 0, 0, env) { }
+  CPUDevice(InternalEnvironment* env)
+    : Device(DEV_TYPE_CPU, 0, 0, env)
+    , onDeviceCount()
+  { }
 
   virtual int SetMemoryMax(int mem)
   {
@@ -172,16 +177,49 @@ public:
   {
     return nullptr;
   }
+
+  void IncrementDevice(AvsDeviceType type) {
+    if (type >= 0 && type < 4) {
+      onDeviceCount[type]++;
+    }
+  }
 };
 
 #ifdef ENABLE_CUDA
 class CUDACPUDevice : public CPUDevice {
+  int num_cuda_devices;
+  //cudaDeviceProp prop;
+  std::atomic<bool> initialized;
+  std::mutex mutex;
+  bool cuda_enabled;
 public:
-  CUDACPUDevice(InternalEnvironment* env) : CPUDevice(env) { }
+  CUDACPUDevice(InternalEnvironment* env, int num_cuda_devices)
+    : CPUDevice(env)
+    , num_cuda_devices(num_cuda_devices)
+    , initialized()
+  {
+    //CUDA_CHECK(cudaGetDeviceProperties(&prop, 0));
+  }
 
   virtual BYTE* Allocate(size_t size)
   {
-    unsigned int flags = cudaHostAllocMapped;
+    // double checked locking
+    if (initialized.load(std::memory_order_acquire) == false) {
+      std::lock_guard<std::mutex> lock(mutex);
+      if (initialized.load(std::memory_order_relaxed) == false) {
+        cuda_enabled = (onDeviceCount[DEV_TYPE_CUDA] > 0);
+        initialized.store(true, std::memory_order_release);
+      }
+    }
+    if (!cuda_enabled) {
+      return CPUDevice::Allocate(size);
+    }
+    //unsigned int flags = (prop.canMapHostMemory && prop.unifiedAddressing)
+    //  ? cudaHostAllocMapped : cudaHostAllocDefault;
+    // Without portable flag, allocated memory is associated with one cuda context,
+    // i.e. one GPU. portable flag is required to use this memory with all GPUs.
+    unsigned int flags = (num_cuda_devices > 1) 
+      ? cudaHostAllocPortable : cudaHostAllocDefault;
     BYTE* data = nullptr;
 #ifdef _DEBUG
     CUDA_CHECK(cudaHostAlloc((void**)&data, size + 16, flags));
@@ -210,8 +248,13 @@ public:
 
   virtual void Free(BYTE* ptr)
   {
-    if (ptr != nullptr) {
-      CUDA_CHECK(cudaFreeHost(ptr));
+    if (!cuda_enabled) {
+      CPUDevice::Free(ptr);
+    }
+    else {
+      if (ptr != nullptr) {
+        CUDA_CHECK(cudaFreeHost(ptr));
+      }
     }
   }
 
@@ -366,7 +409,7 @@ DeviceManager::DeviceManager(InternalEnvironment* env) :
   // if cuda capable device is available, we always allocate with page locked memory.
   // is it OK ???
   cpuDevice = std::unique_ptr<Device>((cuda_device_count > 0)
-      ? new CUDACPUDevice(env)
+      ? new CUDACPUDevice(env, cuda_device_count)
       : new CPUDevice(env));
 #else // ENABLE_CUDA
   cpuDevice = std::unique_ptr<CPUDevice>(new CPUDevice(env));
@@ -1014,7 +1057,7 @@ public:
 
   static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env_)
   {
-    int upstreamType = (int)(size_t)user_data;
+    AvsDeviceType upstreamType = (AvsDeviceType)(size_t)user_data;
     InternalEnvironment* env = static_cast<InternalEnvironment*>(env_);
 
     PClip clip = args[0].AsClip();
@@ -1024,6 +1067,8 @@ public:
     if (numPrefetch < 0) {
       numPrefetch = 0;
     }
+
+    static_cast<CPUDevice*>((void*)env->GetDevice(DEV_TYPE_CPU, 0))->IncrementDevice(upstreamType);
 
     switch (upstreamType) {
     case DEV_TYPE_CPU:
