@@ -3258,20 +3258,28 @@ int ScriptEnvironment::SetMemoryMax(AvsDeviceType type, int index, int mem)
 
 PVideoFrame ScriptEnvironment::GetOnDeviceFrame(const PVideoFrame& src, Device* device)
 {
-	VideoFrame *res = GetNewFrame(src->GetFrameBuffer()->data_size, device);
-	res->offset = src->offset;
+  // make space for alignment
+  size_t size = GetFrameDataSize(src) + FRAME_ALIGN - 1;
+
+	VideoFrame *res = GetNewFrame(size, device);
+
+  const int offset = (int)(AlignPointer(res->vfb->GetWritePtr(), FRAME_ALIGN) - res->vfb->GetWritePtr()); // first line offset for proper alignment
+  const int diff = offset - src->offset;
+
+	res->offset = src->offset + diff;
 	res->pitch = src->pitch;
 	res->row_size = src->row_size;
 	res->height = src->height;
-	res->offsetU = src->offsetU;
-	res->offsetV = src->offsetV;
+	res->offsetU = src->offsetU + diff;
+	res->offsetV = src->offsetV + diff;
 	res->pitchUV = src->pitchUV;
 	res->row_sizeUV = src->row_sizeUV;
 	res->heightUV = src->heightUV;
-	res->offsetA = src->offsetA;
+	res->offsetA = src->pitchA ? (src->offsetA + diff) : 0;
 	res->pitchA = src->pitchA;
 	res->row_sizeA = src->row_sizeA;
   res->avsmap->data = src->avsmap->data;
+
 	return PVideoFrame(res);
 }
 
@@ -3327,8 +3335,18 @@ const AVS_Linkage* __stdcall ScriptEnvironment::GetAVSLinkage() {
 }
 
 
-void __stdcall ScriptEnvironment::ApplyMessage(PVideoFrame* frame, const VideoInfo& vi, const char* message, int size, int textcolor, int halocolor, int bgcolor) {
-  ::ApplyMessage(frame, vi, message, size, textcolor, halocolor, bgcolor, this);
+void __stdcall ScriptEnvironment::ApplyMessage(PVideoFrame* frame, const VideoInfo& vi, const char* message, int size, int textcolor, int halocolor, int bgcolor)
+{
+  if ((*frame)->GetDevice()->device_type == DEV_TYPE_CUDA) {
+    // if frame is CUDA frame, copy to CPU and apply
+    PVideoFrame copy = GetOnDeviceFrame(*frame, DeviceManager.GetCPUDevice());
+    CopyCUDAFrame(copy, *frame, this, true);
+    ::ApplyMessage(&copy, vi, message, size, textcolor, halocolor, bgcolor, this);
+    CopyCUDAFrame(*frame, copy, this, true);
+  }
+  else {
+    ::ApplyMessage(frame, vi, message, size, textcolor, halocolor, bgcolor, this);
+  }
 }
 
 

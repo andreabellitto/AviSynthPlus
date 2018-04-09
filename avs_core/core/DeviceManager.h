@@ -66,4 +66,4 @@ public:
 void CheckChildDeviceTypes(const PClip& child, const char* name,
   const AVSValue& args, const char* const* argnames, InternalEnvironment* env);
 
-void CopyCUDAFrame(const PVideoFrame& dst, const PVideoFrame& src, InternalEnvironment* env);
+void CopyCUDAFrame(const PVideoFrame& dst, const PVideoFrame& src, InternalEnvironment* env, bool sync = false);

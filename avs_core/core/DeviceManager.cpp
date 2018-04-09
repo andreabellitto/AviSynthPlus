@@ -105,6 +105,20 @@ void CheckChildDeviceTypes(const PClip& clip, const char* name, const AVSValue& 
   }
 }
 
+size_t GetFrameDataSize(const PVideoFrame& vf)
+{
+  if (vf->GetPitch(PLANAR_A)) {
+    return vf->GetReadPtr(PLANAR_A) + vf->GetPitch(PLANAR_A) * vf->GetHeight(PLANAR_A) - vf->GetReadPtr();
+  }
+  if (vf->GetPitch(PLANAR_V)) {
+    return vf->GetReadPtr(PLANAR_V) + vf->GetPitch(PLANAR_V) * vf->GetHeight(PLANAR_V) - vf->GetReadPtr();
+  }
+  if (vf->GetPitch()) {
+    return vf->GetPitch() * vf->GetHeight();
+  }
+  return 0;
+}
+
 class CPUDevice : public Device {
 protected:
   int onDeviceCount[4];
@@ -703,12 +717,9 @@ class CUDAFrameTransferEngine : public FrameTransferEngine
 
   void TransferFrameData(PVideoFrame& dst, PVideoFrame& src, bool async, InternalEnvironment* env)
   {
-    VideoFrameBuffer* srcvfb = src->GetFrameBuffer();
-    VideoFrameBuffer* dstvfb = dst->GetFrameBuffer();
-
-    const BYTE* srcptr = srcvfb->GetReadPtr();
-    BYTE* dstptr = dstvfb->GetWritePtr();
-    int sz = srcvfb->GetDataSize();
+    const BYTE* srcptr = src->GetReadPtr();
+    BYTE* dstptr = dst->GetWritePtr();
+    int sz = GetFrameDataSize(src);
     cudaMemcpyKind kind = GetMemcpyKind();
 
     if (async) {
@@ -1038,8 +1049,14 @@ public:
   {
     InternalEnvironment* env = static_cast<InternalEnvironment*>(env_);
     Device* downstreamDevice = env->SetCurrentDevice(upstreamDevice);
-    child->GetAudio(buf, start, count, env);
-    env->SetCurrentDevice(downstreamDevice);
+    try {
+      child->GetAudio(buf, start, count, env);
+      env->SetCurrentDevice(downstreamDevice);
+    }
+    catch (...) {
+      env->SetCurrentDevice(downstreamDevice);
+      throw;
+    }
   }
 
   int __stdcall SetCacheHints(int cachehints, int frame_range)
@@ -1119,16 +1136,33 @@ public:
   }
 };
 
-void CopyCUDAFrame(const PVideoFrame& dst, const PVideoFrame& src, InternalEnvironment* env)
+void CopyCUDAFrame(const PVideoFrame& dst, const PVideoFrame& src, InternalEnvironment* env, bool sync)
 {
-  VideoFrameBuffer* srcvfb = src->GetFrameBuffer();
-  VideoFrameBuffer* dstvfb = dst->GetFrameBuffer();
+  const BYTE* srcptr = src->GetReadPtr();
+  BYTE* dstptr = dst->GetWritePtr();
+  int sz = GetFrameDataSize(src);
+  assert(dst->GetFrameBuffer()->GetReadPtr() + dst->GetFrameBuffer()->GetDataSize() - dstptr >= sz);
 
-  const BYTE* srcptr = srcvfb->GetReadPtr();
-  BYTE* dstptr = dstvfb->GetWritePtr();
-  int sz = srcvfb->GetDataSize();
+  AvsDeviceType srcDevice = src->GetDevice()->device_type;
+  AvsDeviceType dstDevice = dst->GetDevice()->device_type;
+  cudaMemcpyKind kind = cudaMemcpyHostToHost;
 
-  CUDA_CHECK(cudaMemcpyAsync(dstptr, srcptr, sz, cudaMemcpyDeviceToDevice));
+  if (srcDevice == DEV_TYPE_CPU && dstDevice == DEV_TYPE_CUDA) {
+    kind = cudaMemcpyHostToDevice;
+  }
+  if (srcDevice == DEV_TYPE_CUDA && dstDevice == DEV_TYPE_CPU) {
+    kind = cudaMemcpyDeviceToHost;
+  }
+  if (srcDevice == DEV_TYPE_CUDA && dstDevice == DEV_TYPE_CUDA) {
+    kind = cudaMemcpyDeviceToDevice;
+  }
+
+  if (sync) {
+    CUDA_CHECK(cudaMemcpy(dstptr, srcptr, sz, kind));
+  }
+  else {
+    CUDA_CHECK(cudaMemcpyAsync(dstptr, srcptr, sz, kind));
+  }
 }
 
 extern const AVSFunction Device_filters[] = {

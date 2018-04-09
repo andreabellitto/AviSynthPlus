@@ -586,6 +586,10 @@ bool VideoFrame::DeleteProperty(const char* key) {
 	return (avsmap->data.erase(key) > 0);
 }
 
+PDevice VideoFrame::GetDevice() const {
+  return vfb->device;
+}
+
 int VideoFrame::CheckMemory() const {
 #ifdef _DEBUG
   if (vfb->data && vfb->device->device_type == DEV_TYPE_CPU) {
@@ -1369,6 +1373,7 @@ static const AVS_Linkage avs_linkage = {    // struct AVS_Linkage {
   &PDevice::GetName,
   // end class PDevice
 
+  &VideoFrame::GetDevice,
   &VideoFrame::CheckMemory,
 
 // this part should be identical with struct AVS_Linkage in avisynth.h
