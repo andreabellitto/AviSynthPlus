@@ -585,7 +585,7 @@ Write::Write (PClip _child, const char* _filename, AVSValue args, int _linecheck
 	arglist = new exp_res[arrsize];
 
 	for (int i=0; i<arrsize; i++) {
-		arglist[i].expression = args[i].AsString(EMPTY);
+		arglist[i].expression = args[i];
 		arglist[i].string = EMPTY;
 	}
 
@@ -654,18 +654,25 @@ void Write::FileOut(IScriptEnvironment* env, const char* mode) {
 	}
 }
 
-bool Write::DoEval( IScriptEnvironment* env) {
+bool Write::DoEval( IScriptEnvironment* env_) {
 	bool keep_this_line = true;
 	int i;
 	AVSValue expr;
 	AVSValue result;
+  InternalEnvironment* env = static_cast<InternalEnvironment*>(env_);
 
 	for (i=0; i<arrsize; i++) {
 		expr = arglist[i].expression;
 		
 		if ( (linecheck==1) && (i==0)) {
 			try {
-				result = env->Invoke("Eval",expr);
+        if (expr.IsFunction()) {
+          env->Invoke(child, expr.AsFunction(), AVSValue(nullptr, 0));
+        }
+        else {
+          expr = expr.AsString(EMPTY);
+          result = env->Invoke("Eval", expr);
+        }
 				if (!result.AsBool(true)) {
 					keep_this_line = false;
 					break;
@@ -675,7 +682,13 @@ bool Write::DoEval( IScriptEnvironment* env) {
 			}
 		} else {
 			try {
-				result = env->Invoke("Eval",expr);
+        if (expr.IsFunction()) {
+          env->Invoke(child, expr.AsFunction(), AVSValue(nullptr, 0));
+        }
+        else {
+          expr = expr.AsString(EMPTY);
+          result = env->Invoke("Eval", expr);
+        }
 				result = env->Invoke("string",result);	//convert all results to a string
 				arglist[i].string = result.AsString(EMPTY);
 			} catch (const AvisynthError &error) {

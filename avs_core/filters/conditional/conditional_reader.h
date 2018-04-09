@@ -85,7 +85,7 @@ private:
 	char filename[_MAX_PATH];
 	int arrsize;
 	struct exp_res {
-		const char* expression;
+		AVSValue expression;
 		const char* string;
 	};
 	exp_res* arglist;

@@ -47,6 +47,7 @@
 #include "../internal.h"
 #include "../Prefetcher.h"
 #include "../InternalEnvironment.h"
+#include "../strings.h"
 #include <map>
 
 
@@ -247,7 +248,7 @@ extern const AVSFunction Script_functions[] = {
   { "Prefetch",         BUILTIN_FUNC_PREFIX, "c[threads]i[frames]i", Prefetcher::Create },
   { "SetLogParams",     BUILTIN_FUNC_PREFIX, "[target]s[level]i", SetLogParams },
   { "LogMsg",              BUILTIN_FUNC_PREFIX, "si", LogMsg },
-	{ "SetCacheMode",     BUILTIN_FUNC_PREFIX, "[mode]i", SetCacheMode },
+  { "SetCacheMode",     BUILTIN_FUNC_PREFIX, "[mode]i", SetCacheMode },
 
   { "IsY",       BUILTIN_FUNC_PREFIX, "c", IsY },
   { "Is420",     BUILTIN_FUNC_PREFIX, "c", Is420 },
@@ -391,17 +392,6 @@ AVSValue EvalOop(AVSValue args, void*, IScriptEnvironment* env)
   }
   env->SetVar("last", prev_last);            // Restore implicit last
   return result;
-}
-
-static std::unique_ptr<char[]> WideToMultiByte(int codePage, LPCWSTR src, int len) {
-  if (len == 0) {
-    return std::unique_ptr<char[]>(new char[1]());
-  }
-  int dstlen = WideCharToMultiByte(codePage, 0, src, len, NULL, 0, NULL, NULL);
-  auto ret = std::unique_ptr<char[]>(new char[dstlen + 1]);
-  WideCharToMultiByte(codePage, 0, src, len, ret.get(), dstlen, NULL, NULL);
-  ret[dstlen] = 0;
-  return ret;
 }
 
 AVSValue Import(AVSValue args, void*, IScriptEnvironment* env)

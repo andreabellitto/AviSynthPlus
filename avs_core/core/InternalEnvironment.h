@@ -156,10 +156,11 @@ public:
   virtual PVideoFrame __stdcall NewVideoFrameOnDevice(const VideoInfo& vi, int align, Device* device) = 0;
   virtual PVideoFrame __stdcall GetOnDeviceFrame(const PVideoFrame& src, Device* device) = 0;
   virtual AVSMap* __stdcall GetAVSMap(PVideoFrame& frame) = 0;
-  virtual bool __stdcall InvokeThread(AVSValue* result, const char* name, const Function* func, const AVSValue& args,
-    const char* const* arg_names, InternalEnvironment* env) = 0;
 
   using INeoEnv::SetMemoryMax;
+  using INeoEnv::Invoke;
+  using INeoEnv::NewVideoFrame;
+  using INeoEnv::SaveString;
 
   // Nekopanda: support multiple prefetcher //
   // to allow thread to submit with their env
@@ -179,7 +180,10 @@ public:
   bool increaseCache;
 
   virtual void __stdcall UpdateFunctionExports(const char* funcName, const char* funcParams, const char *exportVar) = 0;
-  virtual bool __stdcall InvokeFunc(AVSValue *result, const char* name, const Function *f, const AVSValue& args, const char* const* arg_names = 0) = 0;
+
+  virtual bool __stdcall Invoke_(AVSValue *result, const AVSValue& implicit_last,
+    const char* name, const Function *f, const AVSValue& args, const char* const* arg_names,
+    IScriptEnvironment* env_thread) = 0;
 };
 
 struct InternalEnvironmentDeleter {

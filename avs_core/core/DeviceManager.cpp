@@ -1061,65 +1061,61 @@ public:
     AvsDeviceType upstreamType = (AvsDeviceType)(size_t)user_data;
     InternalEnvironment* env = static_cast<InternalEnvironment*>(env_);
 
-    PClip clip = args[0].AsClip();
-    int numPrefetch = args[1].Defined() ? args[1].AsInt() : 4;
-    int upstreamIndex = (args.ArraySize() >= 3 && args[2].Defined()) ? args[2].AsInt() : 0;
+    if (args[0].IsClip()) {
+      PClip clip = args[0].AsClip();
+      int numPrefetch = args[1].Defined() ? args[1].AsInt() : 4;
+      int upstreamIndex = (args.ArraySize() >= 3 && args[2].Defined()) ? args[2].AsInt() : 0;
 
-    if (numPrefetch < 0) {
-      numPrefetch = 0;
+      if (numPrefetch < 0) {
+        numPrefetch = 0;
+      }
+
+      static_cast<CPUDevice*>((void*)env->GetDevice(DEV_TYPE_CPU, 0))->IncrementDevice(upstreamType);
+
+      switch (upstreamType) {
+      case DEV_TYPE_CPU:
+        return new OnDevice(clip, numPrefetch, (Device*)(void*)env->GetDevice(DEV_TYPE_CPU, 0), env);
+      case DEV_TYPE_CUDA:
+        return new OnDevice(clip, numPrefetch, (Device*)(void*)env->GetDevice(DEV_TYPE_CUDA, upstreamIndex), env);
+      }
+
+      env->ThrowError("Not supported device ...");
+      return AVSValue();
     }
+    else {
+      assert(args[0].IsFunction());
+      PFunction func = args[0].AsFunction();
+      int upstreamIndex = (args.ArraySize() >= 2 && args[1].Defined()) ? args[1].AsInt() : 0;
 
-    static_cast<CPUDevice*>((void*)env->GetDevice(DEV_TYPE_CPU, 0))->IncrementDevice(upstreamType);
-
-    switch (upstreamType) {
-    case DEV_TYPE_CPU:
-      return new OnDevice(clip, numPrefetch, (Device*)(void*)env->GetDevice(DEV_TYPE_CPU, 0), env);
-    case DEV_TYPE_CUDA:
-      return new OnDevice(clip, numPrefetch, (Device*)(void*)env->GetDevice(DEV_TYPE_CUDA, upstreamIndex), env);
-    }
-
-    env->ThrowError("Not supported device ...");
-    return AVSValue();
-  }
-
-  static AVSValue __cdecl Eval(AVSValue args, void* user_data, IScriptEnvironment* env_)
-  {
-     int upstreamType = (int)(size_t)user_data;
-     InternalEnvironment* env = static_cast<InternalEnvironment*>(env_);
-
-     const char* str = args[0].AsString();
-     int upstreamIndex = (args.ArraySize() >= 2 && args[1].Defined()) ? args[1].AsInt() : 0;
-
-     Device* upstreamDevice = nullptr;
-     switch (upstreamType) {
-     case DEV_TYPE_CPU:
+      Device* upstreamDevice = nullptr;
+      switch (upstreamType) {
+      case DEV_TYPE_CPU:
         upstreamDevice = (Device*)(void*)env->GetDevice(DEV_TYPE_CPU, 0);
         break;
-     case DEV_TYPE_CUDA:
+      case DEV_TYPE_CUDA:
         upstreamDevice = (Device*)(void*)env->GetDevice(DEV_TYPE_CUDA, upstreamIndex);
         break;
-     default:
+      default:
         env->ThrowError("Not supported device ...");
         break;
-     }
+      }
 
-     Device* downstreamDevice = env->SetCurrentDevice(upstreamDevice);
+      Device* downstreamDevice = env->SetCurrentDevice(upstreamDevice);
 
-     if (downstreamDevice == nullptr) {
+      if (downstreamDevice == nullptr) {
         env->ThrowError("This thread is not created by AviSynth. It is not allowed to invoke script on this thread ...");
-     }
+      }
 
-     try {
-        ScriptParser parser(env, args[0].AsString(), "EvalOnDevice");
-        PExpression exp = parser.Parse();
-        AVSValue ret = exp->Evaluate(env);
+      try {
+        AVSValue ret = env->Invoke(AVSValue(), func, AVSValue(nullptr, 0));
         env->SetCurrentDevice(downstreamDevice);
         return ret;
-     }
-     catch (...) {
+      }
+      catch (...) {
         env->SetCurrentDevice(downstreamDevice);
         throw;
-     }
+      }
+    }
   }
 };
 
@@ -1138,7 +1134,7 @@ void CopyCUDAFrame(const PVideoFrame& dst, const PVideoFrame& src, InternalEnvir
 extern const AVSFunction Device_filters[] = {
   { "OnCPU", BUILTIN_FUNC_PREFIX, "c[num_prefetch]i", OnDevice::Create, (void*)DEV_TYPE_CPU },
   { "OnCUDA", BUILTIN_FUNC_PREFIX, "c[num_prefetch]i[device_index]i", OnDevice::Create, (void*)DEV_TYPE_CUDA },
-  { "EvalOnCPU", BUILTIN_FUNC_PREFIX, "s", OnDevice::Eval, (void*)DEV_TYPE_CPU },
-  { "EvalOnCUDA", BUILTIN_FUNC_PREFIX, "s[device_index]i", OnDevice::Eval, (void*)DEV_TYPE_CUDA },
+  { "OnCPU", BUILTIN_FUNC_PREFIX, "n", OnDevice::Create, (void*)DEV_TYPE_CPU },
+  { "OnCUDA", BUILTIN_FUNC_PREFIX, "n[device_index]i", OnDevice::Create, (void*)DEV_TYPE_CUDA },
   { 0 }
 };

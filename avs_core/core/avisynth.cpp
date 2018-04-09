@@ -637,7 +637,8 @@ public:
 	ScriptEnvironment();
   void __stdcall CheckVersion(int version);
   int __stdcall GetCPUFlags();
-  char* __stdcall SaveString(const char* s, int length = -1);
+  char* __stdcall SaveString(const char* s, int length = -1) { return SaveString(s, length, false); }
+  char* __stdcall SaveString(const char* s, int length, bool escape);
   char* __stdcall Sprintf(const char* fmt, ...);
   char* __stdcall VSprintf(const char* fmt, void* val);
   void __stdcall ThrowError(const char* fmt, ...);
@@ -712,12 +713,13 @@ public:
   virtual PVideoFrame __stdcall SubframePlanarA(PVideoFrame src, int rel_offset, int new_pitch, int new_row_size, int new_height, int rel_offsetU, int rel_offsetV, int new_pitchUV, int rel_offsetA);
 
 	/* INeoEnv */
-	virtual AVSValue __stdcall Invoke(const PFunction& func, const AVSValue args, const char* const* arg_names = 0);
-	virtual bool __stdcall Invoke(AVSValue *result, const PFunction& func, const AVSValue args, const char* const* arg_names = 0);
+  virtual bool __stdcall Invoke(AVSValue* result, const AVSValue& implicit_last, const char* name, const AVSValue args, const char* const* arg_names = 0);
+  virtual AVSValue __stdcall Invoke(const AVSValue& implicit_last, const PFunction& func, const AVSValue args, const char* const* arg_names = 0);
+	virtual bool __stdcall Invoke(AVSValue *result, const AVSValue& implicit_last, const PFunction& func, const AVSValue args, const char* const* arg_names = 0);
 
-	virtual bool __stdcall InvokeThread(AVSValue* result, const char* name, const Function *f, const AVSValue& args,
-		const char* const* arg_names, InternalEnvironment* env);
-	virtual bool __stdcall InvokeFunc(AVSValue *result, const char* name, const Function *f, const AVSValue& args, const char* const* arg_names = 0);
+	virtual bool __stdcall Invoke_(AVSValue *result, const AVSValue& implicit_last,
+    const char* name, const Function *f, const AVSValue& args, const char* const* arg_names,
+    IScriptEnvironment* env_thread);
 
   virtual Device* __stdcall SetCurrentDevice(Device* device);
   virtual Device* __stdcall GetCurrentDevice() const;
@@ -2638,10 +2640,11 @@ bool ScriptEnvironment::CheckArguments(const Function* func, const AVSValue* arg
   return false;
 }
 
-AVSValue ScriptEnvironment::Invoke(const char* name, const AVSValue args, const char* const* arg_names)
+AVSValue ScriptEnvironment::Invoke(const char* name,
+  const AVSValue args, const char* const* arg_names)
 {
 	AVSValue result;
-	if (!InvokeFunc(&result, name, nullptr, args, arg_names))
+	if (!Invoke_(&result, AVSValue(), name, nullptr, args, arg_names, nullptr))
   {
     throw NotFound();
   }
@@ -2661,149 +2664,36 @@ AVSValue ScriptEnvironment::Invoke(const char* name, const AVSValue args, const 
   return result;
 }
 
-AVSValue ScriptEnvironment::Invoke(const PFunction& func, const AVSValue args, const char* const* arg_names)
+bool __stdcall ScriptEnvironment::Invoke(AVSValue* result,
+  const char* name, const AVSValue& args, const char* const* arg_names)
+{
+  return Invoke_(result, AVSValue(), name, nullptr, args, arg_names, nullptr);
+}
+
+bool __stdcall ScriptEnvironment::Invoke(AVSValue* result, const AVSValue& implicit_last,
+  const char* name, const AVSValue args, const char* const* arg_names)
+{
+  return Invoke_(result, implicit_last,
+    name, nullptr, args, arg_names, nullptr);
+}
+
+AVSValue __stdcall ScriptEnvironment::Invoke(const AVSValue& implicit_last,
+  const PFunction& func, const AVSValue args, const char* const* arg_names)
 {
   AVSValue result;
-  if (!InvokeFunc(&result, func->GetLegacyName(), func->GetDefinition(), args, arg_names))
+  if (!Invoke_(&result, implicit_last,
+    func->GetLegacyName(), func->GetDefinition(), args, arg_names, nullptr))
   {
     throw NotFound();
   }
   return result;
 }
 
-bool __stdcall ScriptEnvironment::InvokeThread(AVSValue* result, const char* name, const Function *f, const AVSValue& args, const char* const* arg_names, InternalEnvironment* env)
+bool __stdcall ScriptEnvironment::Invoke(AVSValue *result, const AVSValue& implicit_last,
+  const PFunction& func, const AVSValue args, const char* const* arg_names)
 {
-	const int args_names_count = (arg_names && args.IsArray()) ? args.ArraySize() : 0;
-
-  if (name == nullptr) {
-    // for debug printing
-    name = "<anonymous function>";
-  }
-
-	// get how many args we will need to store
-	size_t args2_count = Flatten(args, NULL, 0, 0, arg_names);
-	if (args2_count > ScriptParser::max_args)
-		ThrowError("Too many arguments passed to function (max. is %d)", ScriptParser::max_args);
-
-	// flatten unnamed args
-	std::vector<AVSValue> args2(args2_count, AVSValue());
-	Flatten(args, args2.data(), 0, 0, arg_names);
-
-	bool strict = false;
-  if (f != nullptr) {
-    // check arguments
-    if (!this->CheckArguments(f, args2.data(), args2_count, strict, args_names_count, arg_names))
-      return false;
-  }
-  else {
-    // find matching function
-    f = this->Lookup(name, args2.data(), args2_count, strict, args_names_count, arg_names);
-    if (!f) {
-      return false;
-    }
-  }
-
-	// combine unnamed args into arrays
-	size_t src_index = 0, dst_index = 0;
-	const char* p = f->param_types;
-	const size_t maxarg3 = max(args2_count, strlen(p)); // well it can't be any longer than this.
-
-	std::vector<AVSValue> args3(maxarg3, AVSValue());
-
-	while (*p) {
-		if (*p == '[') {
-			p = strchr(p + 1, ']');
-			if (!p) break;
-			p++;
-		}
-		else if ((p[1] == '*') || (p[1] == '+')) {
-			size_t start = src_index;
-			while ((src_index < args2_count) && (AVSFunction::SingleTypeMatch(*p, args2[src_index], strict)))
-				src_index++;
-			size_t size = src_index - start;
-			assert(args2_count >= size);
-
-			// Even if the AVSValue below is an array of zero size, we can't skip adding it to args3,
-			// because filters like BlankClip might still be expecting it.
-			args3[dst_index++] = AVSValue(size > 0 ? args2.data() + start : NULL, (int)size); // can't delete args2 early because of this
-
-			p += 2;
-		}
-		else {
-			if (src_index < args2_count)
-				args3[dst_index] = args2[src_index];
-			src_index++;
-			dst_index++;
-			p++;
-		}
-	}
-	if (src_index < args2_count)
-		ThrowError("Too many arguments to function %s", name);
-
-	const int args3_count = (int)dst_index;
-
-	// copy named args
-	for (int i = 0; i<args_names_count; ++i) {
-		if (arg_names[i]) {
-			size_t named_arg_index = 0;
-			for (const char* p = f->param_types; *p; ++p) {
-				if (*p == '*' || *p == '+') {
-					continue;   // without incrementing named_arg_index
-				}
-				else if (*p == '[') {
-					p += 1;
-					const char* q = strchr(p, ']');
-					if (!q) break;
-					if (strlen(arg_names[i]) == size_t(q - p) && !_strnicmp(arg_names[i], p, q - p)) {
-						// we have a match
-						if (args3[named_arg_index].Defined()) {
-							// so named args give can't have .+ specifier
-							ThrowError("Script error: the named argument \"%s\" was passed more than once to %s", arg_names[i], name);
-						}
-#ifndef NEW_AVSVALUE
-						//PF 161028 AVS+ arrays as named arguments
-						else if (args[i].IsArray()) {
-							ThrowError("Script error: can't pass an array as a named argument");
-						}
-#endif
-						else if (args[i].Defined() && !AVSFunction::SingleTypeMatch(q[1], args[i], false)) {
-							ThrowError("Script error: the named argument \"%s\" to %s had the wrong type", arg_names[i], name);
-						}
-						else {
-							args3[named_arg_index] = args[i];
-							goto success;
-						}
-					}
-					else {
-						p = q + 1;
-					}
-				}
-				named_arg_index++;
-			}
-			// failure
-			ThrowError("Script error: %s does not have a named argument \"%s\"", name, arg_names[i]);
-		success:;
-		}
-	}
-
-	// Trim array size to the actual number of arguments
-	args3.resize(args3_count);
-	std::vector<AVSValue>(args3).swap(args3);
-
-	AVSValue funcArgs(args3.data(), (int)args3.size());
-	*result = f->apply(funcArgs, f->user_data, env);
-
-	return true;
-}
-
-bool __stdcall ScriptEnvironment::Invoke(AVSValue* result, const char* name, const AVSValue& args, const char* const* arg_names)
-{
-  return InvokeFunc(result, name, nullptr, args, arg_names);
-}
-
-bool __stdcall ScriptEnvironment::Invoke(AVSValue *result, const PFunction& func, const AVSValue args, const char* const* arg_names)
-{
-  return InvokeFunc(result, func->GetLegacyName(), func->GetDefinition(), args, arg_names);
+  return Invoke_(result, implicit_last, 
+    func->GetLegacyName(), func->GetDefinition(), args, arg_names, nullptr);
 }
 
 struct SuppressThreadCounter {
@@ -2811,22 +2701,154 @@ struct SuppressThreadCounter {
   ~SuppressThreadCounter() { --g_suppress_thread_count; }
 };
 
-bool __stdcall ScriptEnvironment::InvokeFunc(AVSValue *result, const char* name, const Function *f, const AVSValue& args, const char* const* arg_names)
+bool __stdcall ScriptEnvironment::Invoke_(AVSValue *result, const AVSValue& implicit_last,
+  const char* name, const Function *f, const AVSValue& args, const char* const* arg_names,
+  IScriptEnvironment* env_thread)
 {
-	if (g_thread_id != 0) {
+	if (env_thread == nullptr && g_thread_id != 0) {
 		ThrowError("Invalid ScriptEnvironment. You are using different thread's environment.");
 	}
 
 	if (g_getframe_recursive_count != 0) {
 		// Invoked from GetFrame/GetAudio, skip all cache and mt mecanism
-		return InvokeThread(result, name, f, args, arg_names, this);
+    env_thread = this;
 	}
+
+  const int args_names_count = (arg_names && args.IsArray()) ? args.ArraySize() : 0;
 
   if (name == nullptr) {
     // for debug printing
     name = "<anonymous function>";
   }
-	
+
+  // get how many args we will need to store
+  size_t args2_count = Flatten(args, NULL, 0, 0, arg_names);
+  if (args2_count > ScriptParser::max_args)
+    ThrowError("Too many arguments passed to function (max. is %d)", ScriptParser::max_args);
+
+  // flatten unnamed args
+  std::vector<AVSValue> args2(args2_count + 1, AVSValue());
+  args2[0] = implicit_last;
+  Flatten(args, args2.data() + 1, 0, 0, arg_names);
+
+  bool strict = false;
+  int argbase = 1;
+  if (f != nullptr) {
+    // check arguments
+    if (!this->CheckArguments(f, args2.data() + 1, args2_count, strict, args_names_count, arg_names)) {
+      if (!implicit_last.Defined() ||
+        !this->CheckArguments(f, args2.data(), args2_count + 1, strict, args_names_count, arg_names))
+        return false;
+      argbase = 0;
+    }
+  }
+  else {
+    // find matching function
+    f = this->Lookup(name, args2.data() + 1, args2_count, strict, args_names_count, arg_names);
+    if (!f) {
+      if (!implicit_last.Defined())
+        return false;
+      f = this->Lookup(name, args2.data(), args2_count + 1, strict, args_names_count, arg_names);
+      if (!f)
+        return false;
+      argbase = 0;
+    }
+  }
+
+  // combine unnamed args into arrays
+  size_t src_index = 0, dst_index = 0;
+  const char* p = f->param_types;
+  const size_t maxarg3 = max(args2_count + 1, strlen(p)); // well it can't be any longer than this.
+
+  std::vector<AVSValue> args3(maxarg3, AVSValue());
+
+  while (*p) {
+    if (*p == '[') {
+      p = strchr(p + 1, ']');
+      if (!p) break;
+      p++;
+    }
+    else if ((p[1] == '*') || (p[1] == '+')) {
+      size_t start = src_index;
+      while ((src_index < args2_count) && (AVSFunction::SingleTypeMatch(*p, args2[argbase + src_index], strict)))
+        src_index++;
+      size_t size = src_index - start;
+      assert(args2_count >= size);
+
+      // Even if the AVSValue below is an array of zero size, we can't skip adding it to args3,
+      // because filters like BlankClip might still be expecting it.
+      args3[dst_index++] = AVSValue(size > 0 ? args2.data() + argbase + start : NULL, (int)size); // can't delete args2 early because of this
+
+      p += 2;
+    }
+    else {
+      if (src_index < args2_count)
+        args3[dst_index] = args2[argbase + src_index];
+      src_index++;
+      dst_index++;
+      p++;
+    }
+  }
+  if (src_index < args2_count)
+    ThrowError("Too many arguments to function %s", name);
+
+  const int args3_count = (int)dst_index;
+
+  // copy named args
+  for (int i = 0; i<args_names_count; ++i) {
+    if (arg_names[i]) {
+      size_t named_arg_index = 0;
+      for (const char* p = f->param_types; *p; ++p) {
+        if (*p == '*' || *p == '+') {
+          continue;   // without incrementing named_arg_index
+        }
+        else if (*p == '[') {
+          p += 1;
+          const char* q = strchr(p, ']');
+          if (!q) break;
+          if (strlen(arg_names[i]) == size_t(q - p) && !_strnicmp(arg_names[i], p, q - p)) {
+            // we have a match
+            if (args3[named_arg_index].Defined()) {
+              // so named args give can't have .+ specifier
+              ThrowError("Script error: the named argument \"%s\" was passed more than once to %s", arg_names[i], name);
+            }
+#ifndef NEW_AVSVALUE
+            //PF 161028 AVS+ arrays as named arguments
+            else if (args[i].IsArray()) {
+              ThrowError("Script error: can't pass an array as a named argument");
+            }
+#endif
+            else if (args[i].Defined() && !AVSFunction::SingleTypeMatch(q[1], args[i], false)) {
+              ThrowError("Script error: the named argument \"%s\" to %s had the wrong type", arg_names[i], name);
+            }
+            else {
+              args3[named_arg_index] = args[i];
+              goto success;
+            }
+          }
+          else {
+            p = q + 1;
+          }
+        }
+        named_arg_index++;
+      }
+      // failure
+      ThrowError("Script error: %s does not have a named argument \"%s\"", name, arg_names[i]);
+    success:;
+    }
+  }
+
+  // Trim array size to the actual number of arguments
+  args3.resize(args3_count);
+  std::vector<AVSValue>(args3).swap(args3);
+
+  if(env_thread) {
+    // Invoked by a thread or GetFrame
+    AVSValue funcArgs(args3.data(), (int)args3.size());
+    *result = f->apply(funcArgs, f->user_data, env_thread);
+    return true;
+  }
+
 #ifdef DEBUG_GSCRIPTCLIP_MT
   _RPT3(0, "ScriptEnvironment::Invoke %s try memory lock %p thread %d\n", name, (void *)&memory_mutex, GetCurrentThreadId());
   std::unique_lock<std::recursive_mutex> env_lock(memory_mutex);
@@ -2836,8 +2858,6 @@ bool __stdcall ScriptEnvironment::InvokeFunc(AVSValue *result, const char* name,
 #endif
 
   SuppressThreadCounter suppressThreadCount_;
-
-  bool strict = false;
 
   // chainedCtor is true if we are being constructed inside/by the
   // constructor of another filter. In that case we want MT protections
@@ -2849,20 +2869,10 @@ bool __stdcall ScriptEnvironment::InvokeFunc(AVSValue *result, const char* name,
   std::vector<MTGuardExit*> GuardExits;
 #endif
 
-  const int args_names_count = (arg_names && args.IsArray()) ? args.ArraySize() : 0;
-
-  // get how many args we will need to store
-  size_t args2_count = Flatten(args, NULL, 0, 0, arg_names);
-  if (args2_count > ScriptParser::max_args)
-    ThrowError("Too many arguments passed to function (max. is %d)", ScriptParser::max_args);
-
-  // flatten unnamed args
-  std::vector<AVSValue> args2(args2_count, AVSValue());
-  Flatten(args, args2.data(), 0, 0, arg_names);
-
   bool foundClipArgument = false;
-  for (auto &argx : args2)
+  for (int i = argbase; (int)args2.size(); ++i)
   {
+    auto& argx = args2[i];
 #ifndef NEW_AVSVALUE
     assert(!argx.IsArray()); // todo: we can have arrays 161106
 #endif
@@ -2893,100 +2903,6 @@ bool __stdcall ScriptEnvironment::InvokeFunc(AVSValue *result, const char* name,
       }
   }
   bool isSourceFilter = !foundClipArgument;
-
-  if (f != nullptr) {
-    // check arguments
-    if (!CheckArguments(f, args2.data(), args2_count, strict, args_names_count, arg_names))
-      return false;
-  }
-  else {
-    // find matching function
-    f = this->Lookup(name, args2.data(), args2_count, strict, args_names_count, arg_names);
-    if (!f)
-      return false;
-  }
-
-  // combine unnamed args into arrays
-  size_t src_index=0, dst_index=0;
-  const char* p = f->param_types;
-  const size_t maxarg3 = max(args2_count, strlen(p)); // well it can't be any longer than this.
-
-  std::vector<AVSValue> args3(maxarg3, AVSValue());
-
-  while (*p) {
-    if (*p == '[') {
-      p = strchr(p+1, ']');
-      if (!p) break;
-      p++;
-    } else if ((p[1] == '*') || (p[1] == '+')) {
-      size_t start = src_index;
-      while ((src_index < args2_count) && (AVSFunction::SingleTypeMatch(*p, args2[src_index], strict)))
-        src_index++;
-      size_t size = src_index - start;
-      assert(args2_count >= size);
-
-      // Even if the AVSValue below is an array of zero size, we can't skip adding it to args3,
-      // because filters like BlankClip might still be expecting it.
-      args3[dst_index++] = AVSValue(size > 0 ? args2.data()+start : NULL, (int)size); // can't delete args2 early because of this
-
-      p += 2;
-    } else {
-      if (src_index < args2_count)
-        args3[dst_index] = args2[src_index];
-      src_index++;
-      dst_index++;
-      p++;
-    }
-  }
-  if (src_index < args2_count)
-    ThrowError("Too many arguments to function %s", name);
-
-  const int args3_count = (int)dst_index;
-
-  // copy named args
-  for (int i=0; i<args_names_count; ++i) {
-    if (arg_names[i]) {
-      size_t named_arg_index = 0;
-      for (const char* p = f->param_types; *p; ++p) {
-        if (*p == '*' || *p == '+') {
-          continue;   // without incrementing named_arg_index
-        } else if (*p == '[') {
-          p += 1;
-          const char* q = strchr(p, ']');
-          if (!q) break;
-          if (strlen(arg_names[i]) == size_t(q-p) && !_strnicmp(arg_names[i], p, q-p)) {
-            // we have a match
-            if (args3[named_arg_index].Defined()) {
-              // so named args give can't have .+ specifier
-              ThrowError("Script error: the named argument \"%s\" was passed more than once to %s", arg_names[i], name);
-            }
-#ifndef NEW_AVSVALUE
-            //PF 161028 AVS+ arrays as named arguments
-              else if (args[i].IsArray()) {
-              ThrowError("Script error: can't pass an array as a named argument");
-            }
-#endif
-              else if (args[i].Defined() && !AVSFunction::SingleTypeMatch(q[1], args[i], false)) {
-              ThrowError("Script error: the named argument \"%s\" to %s had the wrong type", arg_names[i], name);
-            } else {
-              args3[named_arg_index] = args[i];
-              goto success;
-            }
-          } else {
-            p = q+1;
-          }
-        }
-        named_arg_index++;
-      }
-      // failure
-      ThrowError("Script error: %s does not have a named argument \"%s\"", name, arg_names[i]);
-success:;
-    }
-  }
-
-  // Trim array size to the actual number of arguments
-  args3.resize(args3_count);
-  std::vector<AVSValue>(args3).swap(args3);
 
   // ... and we're finally ready to make the call
   std::unique_ptr<const FilterConstructor> funcCtor = std::make_unique<const FilterConstructor>(this, f, &args2, &args3);
@@ -3253,8 +3169,8 @@ void ScriptEnvironment::BitBlt(BYTE* dstp, int dst_pitch, const BYTE* srcp, int 
 }
 
 
-char* ScriptEnvironment::SaveString(const char* s, int len) {
-  return var_table.SaveString(s, len);
+char* ScriptEnvironment::SaveString(const char* s, int len, bool escape) {
+  return var_table.SaveString(s, len, escape);
 }
 
 

@@ -30,6 +30,7 @@
 // import and export plugins, or graphical user interfaces.
 
 #include "strings.h"
+#include "avs/win.h"
 #include <cassert>
 #include <string>
 #include <algorithm>
@@ -106,4 +107,28 @@ bool replace(std::string &haystack, char needle, char newChar)
   std::string haystack_bck = haystack;
   std::replace(haystack.begin(),haystack.end(), needle, newChar);
   return haystack.compare(haystack_bck) != 0;
+}
+
+std::unique_ptr<char[]> WideToMultiByte(int codePage, const wchar_t* src, int len)
+{
+  if (len == 0) {
+    return std::unique_ptr<char[]>(new char[1]());
+  }
+  int dstlen = WideCharToMultiByte(codePage, 0, src, len, NULL, 0, NULL, NULL);
+  auto ret = std::unique_ptr<char[]>(new char[dstlen + 1]);
+  WideCharToMultiByte(codePage, 0, src, len, ret.get(), dstlen, NULL, NULL);
+  ret[dstlen] = 0;
+  return ret;
+}
+
+std::unique_ptr<wchar_t[]> MultiByteToWide(int codePage, const char* src, int len)
+{
+  if (len == 0) {
+    return std::unique_ptr<wchar_t[]>(new wchar_t[1]());
+  }
+  int dstlen = MultiByteToWideChar(codePage, 0, src, len, NULL, 0);
+  auto ret = std::unique_ptr<wchar_t[]>(new wchar_t[dstlen + 1]);
+  MultiByteToWideChar(codePage, 0, src, len, ret.get(), dstlen);
+  ret[dstlen] = 0;
+  return ret;
 }

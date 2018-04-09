@@ -34,6 +34,7 @@
 
 
 #include "tokenizer.h"
+#include "../InternalEnvironment.h"
 #include <avs/win.h>
 
 #include <cfloat>
@@ -236,8 +237,13 @@ void Tokenizer::NextToken() {
       } while (isalnum(*++pc));
       break;
 
-    case '"':    // string
-      {
+    default:
+      if(*pc == '"' || (*pc == 'e' && pc[1] == '"')) { // string
+        bool escape = false;
+        if (*pc == 'e') {
+          escape = true;
+          ++pc;
+        }
         const char *start, *end;
         if (pc[1] == '"' && pc[2] == '"') {
           // """..."""
@@ -265,12 +271,9 @@ void Tokenizer::NextToken() {
         for (const char *cp = start; cp < end; cp++) {
           if (*cp == '\n') { line++; }
         }        type = 's';
-        string = env->SaveString(start, int(end-start));
+        string = static_cast<InternalEnvironment*>(env)->SaveString(start, int(end-start), escape);
       }
-      break;
-
-    default:
-      if (isdigit(*pc)) {
+      else if (isdigit(*pc)) {
         // number
         GetNumber();
       } else if (*pc == '_' || isalpha(*pc)) {

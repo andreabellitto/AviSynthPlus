@@ -220,6 +220,11 @@ public:
     return var_table.SaveString(s, length);
   }
 
+  char* __stdcall SaveString(const char* s, int length, bool escape)
+  {
+    return var_table.SaveString(s, length, escape);
+  }
+
   char* __stdcall Sprintf(const char* fmt, ...)
   {
     va_list val;
@@ -262,27 +267,54 @@ public:
     return core->FunctionExists(name);
   }
 
-  AVSValue __stdcall Invoke(const char* name, const AVSValue args, const char* const* arg_names=0)
-  {
-		AVSValue result;
-		if (!core->InvokeThread(&result, name, nullptr, args, arg_names, this)) {
-			throw NotFound();
-		}
-		return result;
-  }
-
-  AVSValue __stdcall Invoke(const PFunction& func, const AVSValue args, const char* const* arg_names = 0)
+  AVSValue __stdcall Invoke(const char* name,
+    const AVSValue args, const char* const* arg_names)
   {
     AVSValue result;
-    if (!core->InvokeThread(&result, func->GetLegacyName(), func->GetDefinition(), args, arg_names, this)) {
+    if (!core->Invoke_(&result, AVSValue(), name, nullptr, args, arg_names, this))
+    {
       throw NotFound();
     }
     return result;
   }
 
-  bool __stdcall Invoke(AVSValue *result, const PFunction& func, const AVSValue args, const char* const* arg_names = 0)
+  bool __stdcall Invoke(AVSValue* result,
+    const char* name, const AVSValue& args, const char* const* arg_names)
   {
-    return core->InvokeThread(result, func->GetLegacyName(), func->GetDefinition(), args, arg_names, this);
+    return core->Invoke_(result, AVSValue(), name, nullptr, args, arg_names, this);
+  }
+
+  bool __stdcall Invoke(AVSValue* result, const AVSValue& implicit_last,
+    const char* name, const AVSValue args, const char* const* arg_names)
+  {
+    return core->Invoke_(result, implicit_last,
+      name, nullptr, args, arg_names, this);
+  }
+
+  AVSValue __stdcall Invoke(const AVSValue& implicit_last,
+    const PFunction& func, const AVSValue args, const char* const* arg_names)
+  {
+    AVSValue result;
+    if (!core->Invoke_(&result, implicit_last,
+      func->GetLegacyName(), func->GetDefinition(), args, arg_names, this))
+    {
+      throw NotFound();
+    }
+    return result;
+  }
+
+  bool __stdcall Invoke(AVSValue *result, const AVSValue& implicit_last,
+    const PFunction& func, const AVSValue args, const char* const* arg_names)
+  {
+    return core->Invoke_(result, implicit_last,
+      func->GetLegacyName(), func->GetDefinition(), args, arg_names, this);
+  }
+
+  bool __stdcall Invoke_(AVSValue *result, const AVSValue& implicit_last,
+    const char* name, const Function *f, const AVSValue& args, const char* const* arg_names,
+    IScriptEnvironment* env_thread)
+  {
+    return core->Invoke_(result, implicit_last, name, f, args, arg_names, this);
   }
 
   bool __stdcall MakeWritable(PVideoFrame* pvf)
@@ -379,11 +411,6 @@ public:
   virtual int __stdcall DecrImportDepth()
   {
     return core->DecrImportDepth();
-  }
-
-  virtual bool __stdcall Invoke(AVSValue *result, const char* name, const AVSValue& args, const char* const* arg_names=0)
-  {
-    return core->InvokeThread(result, name, nullptr, args, arg_names, this);
   }
 
   size_t  __stdcall GetProperty(AvsEnvProperty prop)
@@ -552,12 +579,6 @@ public:
     return core->GetAVSMap(frame);
   }
 
-	virtual bool __stdcall InvokeThread(AVSValue* result, const char* name, const Function* func, const AVSValue& args,
-		const char* const* arg_names, InternalEnvironment* env)
-	{
-		return core->InvokeThread(result, name, func, args, arg_names, env);
-	}
-
 	virtual void __stdcall AddRef() {
 		InterlockedIncrement(&refcount);
 	}
@@ -594,11 +615,6 @@ public:
   virtual void __stdcall UpdateFunctionExports(const char*, const char*, const char *)
   {
     return;
-  }
-
-  virtual bool __stdcall InvokeFunc(AVSValue *result, const char* name, const Function* func, const AVSValue& args, const char* const* arg_names = 0)
-  {
-    return core->InvokeThread(result, name, func, args, arg_names, this);
   }
 };
 

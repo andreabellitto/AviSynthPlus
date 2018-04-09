@@ -33,11 +33,15 @@
 #define AVSCORE_STRINGS_H
 
 #include <string>
+#include <memory>
 
 bool streqi(const char* s1, const char* s2);
 std::string concat(const std::string &s1, const std::string &s2);
 bool replace_beginning(std::string &_haystack, const std::string &needle, const std::string &newStr);
 bool replace(std::string &haystack, const std::string &needle, const std::string &newStr);
 bool replace(std::string &haystack, char needle, char newChar);
+
+std::unique_ptr<char[]> WideToMultiByte(int codePage, const wchar_t* src, int len);
+std::unique_ptr<wchar_t[]> MultiByteToWide(int codePage, const char* src, int len);
 
 #endif // AVSCORE_STRINGS_H

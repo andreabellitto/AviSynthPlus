@@ -57,6 +57,10 @@ extern const AVSFunction Conditional_filters[] = {
   {  "WriteFileIf",       BUILTIN_FUNC_PREFIX, "c[filename]ss+[append]b[flush]b", Write::Create_If },
   {  "WriteFileStart",    BUILTIN_FUNC_PREFIX, "c[filename]ss+[append]b", Write::Create_Start },
   {  "WriteFileEnd",      BUILTIN_FUNC_PREFIX, "c[filename]ss+[append]b", Write::Create_End },
+  {  "WriteFile",         BUILTIN_FUNC_PREFIX, "c[filename]sn+[append]b[flush]b", Write::Create }, // function input
+  {  "WriteFileIf",       BUILTIN_FUNC_PREFIX, "c[filename]sn+[append]b[flush]b", Write::Create_If }, // function input
+  {  "WriteFileStart",    BUILTIN_FUNC_PREFIX, "c[filename]sn+[append]b", Write::Create_Start }, // function input
+  {  "WriteFileEnd",      BUILTIN_FUNC_PREFIX, "c[filename]sn+[append]b", Write::Create_End }, // function input
   { "UseVar", BUILTIN_FUNC_PREFIX, "cs+", UseVar::Create },
   { "AddProp", BUILTIN_FUNC_PREFIX, "css", AddProp::Create },
   { 0 }
@@ -133,11 +137,12 @@ PVideoFrame __stdcall ConditionalSelect::GetFrame(int n, IScriptEnvironment* env
       result = exp->Evaluate(env);
     }
     else {
-      AVSValue args(&child_val, 1);
       auto& func = script.AsFunction();
-      if (!envI->InvokeThread(&result, func->GetLegacyName(), func->GetDefinition(), args, 0, envI)) {
+      if (!envI->Invoke_(&result, child_val,
+        func->GetLegacyName(), func->GetDefinition(), AVSValue(nullptr, 0), 0, envI)) 
+      {
         env->ThrowError(
-          "ConditionalSelect: Invalid function parameter type '%s'. Function must accept one clip. \n%s",
+          "ConditionalSelect: Invalid function parameter type '%s'(%s)",
           func->GetDefinition()->param_types, func->ToString(env));
       }
     }
@@ -305,11 +310,12 @@ PVideoFrame __stdcall ConditionalFilter::GetFrame(int n, IScriptEnvironment* env
       e2_result = exp->Evaluate(env);
     }
     else {
-      AVSValue args(&child_val, 1);
       auto& func = eval1.AsFunction();
-      if (!envI->InvokeThread(&e1_result, func->GetLegacyName(), func->GetDefinition(), args, 0, envI)) {
+      if (!envI->Invoke_(&e1_result, child_val,
+        func->GetLegacyName(), func->GetDefinition(), AVSValue(nullptr, 0), 0, envI))
+      {
         env->ThrowError(
-          "ConditionalFilter: Invalid function parameter type '%s'. Function must accept one clip. \n%s",
+          "ConditionalFilter: Invalid function parameter type '%s'(%s)",
           func->GetDefinition()->param_types, func->ToString(env));
       }
       e2_result = true;
@@ -516,11 +522,12 @@ PVideoFrame __stdcall ScriptClip::GetFrame(int n, IScriptEnvironment* env)
       result = exp->Evaluate(env);
     }
     else {
-      AVSValue args(&child_val, 1);
       auto& func = script.AsFunction();
-      if (!envI->InvokeThread(&result, func->GetLegacyName(), func->GetDefinition(), args, 0, envI)) {
+      if (!envI->Invoke_(&result, child_val, 
+        func->GetLegacyName(), func->GetDefinition(), AVSValue(nullptr, 0), 0, envI))
+      {
         env->ThrowError(
-          "ScriptClip: Invalid function parameter type '%s'. Function must accept one clip. \n%s",
+          "ScriptClip: Invalid function parameter type '%s'(%s)",
           func->GetDefinition()->param_types, func->ToString(env));
       }
     }
