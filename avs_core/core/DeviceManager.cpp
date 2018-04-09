@@ -1,6 +1,6 @@
 
-#include "internal.h"
 #include "DeviceManager.h"
+#include "internal.h"
 #include "InternalEnvironment.h"
 #include <avs/minmax.h>
 #include <deque>
@@ -105,18 +105,34 @@ void CheckChildDeviceTypes(const PClip& clip, const char* name, const AVSValue& 
   }
 }
 
-size_t GetFrameDataSize(const PVideoFrame& vf)
+size_t GetFrameHead(const PVideoFrame& vf)
 {
-  if (vf->GetPitch(PLANAR_A)) {
-    return vf->GetReadPtr(PLANAR_A) + vf->GetPitch(PLANAR_A) * vf->GetHeight(PLANAR_A) - vf->GetReadPtr();
+  int head = vf->GetOffset();
+  if (vf->GetPitch(PLANAR_U)) {
+    head = min(head, vf->GetOffset(PLANAR_U));
   }
   if (vf->GetPitch(PLANAR_V)) {
-    return vf->GetReadPtr(PLANAR_V) + vf->GetPitch(PLANAR_V) * vf->GetHeight(PLANAR_V) - vf->GetReadPtr();
+    head = min(head, vf->GetOffset(PLANAR_V));
   }
-  if (vf->GetPitch()) {
-    return vf->GetPitch() * vf->GetHeight();
+  if (vf->GetPitch(PLANAR_A)) {
+    head = min(head, vf->GetOffset(PLANAR_A));
   }
-  return 0;
+  return head;
+}
+
+size_t GetFrameTail(const PVideoFrame& vf)
+{
+  int tail = vf->GetOffset() + vf->GetPitch() * vf->GetHeight();
+  if (vf->GetPitch(PLANAR_U)) {
+    tail = max(tail, vf->GetOffset(PLANAR_U) + vf->GetPitch(PLANAR_U) * vf->GetHeight(PLANAR_U));
+  }
+  if (vf->GetPitch(PLANAR_V)) {
+    tail = max(tail, vf->GetOffset(PLANAR_V) + vf->GetPitch(PLANAR_V) * vf->GetHeight(PLANAR_V));
+  }
+  if (vf->GetPitch(PLANAR_A)) {
+    tail = max(tail, vf->GetOffset(PLANAR_A) + vf->GetPitch(PLANAR_A) * vf->GetHeight(PLANAR_A));
+  }
+  return min(tail, vf->GetFrameBuffer()->GetDataSize());
 }
 
 class CPUDevice : public Device {
@@ -717,9 +733,10 @@ class CUDAFrameTransferEngine : public FrameTransferEngine
 
   void TransferFrameData(PVideoFrame& dst, PVideoFrame& src, bool async, InternalEnvironment* env)
   {
-    const BYTE* srcptr = src->GetReadPtr();
-    BYTE* dstptr = dst->GetWritePtr();
-    int sz = GetFrameDataSize(src);
+    size_t srchead = GetFrameHead(src);
+    size_t sz = GetFrameTail(src) - srchead;
+    const BYTE* srcptr = src->GetFrameBuffer()->GetReadPtr() + srchead;
+    BYTE* dstptr = dst->GetFrameBuffer()->GetWritePtr() + GetFrameHead(dst);
     cudaMemcpyKind kind = GetMemcpyKind();
 
     if (async) {
@@ -1138,10 +1155,10 @@ public:
 
 void CopyCUDAFrame(const PVideoFrame& dst, const PVideoFrame& src, InternalEnvironment* env, bool sync)
 {
-  const BYTE* srcptr = src->GetReadPtr();
-  BYTE* dstptr = dst->GetWritePtr();
-  int sz = GetFrameDataSize(src);
-  assert(dst->GetFrameBuffer()->GetReadPtr() + dst->GetFrameBuffer()->GetDataSize() - dstptr >= sz);
+  size_t srchead = GetFrameHead(src);
+  size_t sz = GetFrameTail(src) - srchead;
+  const BYTE* srcptr = src->GetFrameBuffer()->GetReadPtr() + srchead;
+  BYTE* dstptr = dst->GetFrameBuffer()->GetWritePtr() + GetFrameHead(dst);
 
   AvsDeviceType srcDevice = src->GetDevice()->device_type;
   AvsDeviceType dstDevice = dst->GetDevice()->device_type;

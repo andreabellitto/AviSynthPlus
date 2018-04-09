@@ -3258,20 +3258,22 @@ int ScriptEnvironment::SetMemoryMax(AvsDeviceType type, int index, int mem)
 
 PVideoFrame ScriptEnvironment::GetOnDeviceFrame(const PVideoFrame& src, Device* device)
 {
+  size_t srchead = GetFrameHead(src);
+
   // make space for alignment
-  size_t size = GetFrameDataSize(src) + FRAME_ALIGN - 1;
+  size_t size = GetFrameTail(src) - srchead + FRAME_ALIGN - 1;
 
 	VideoFrame *res = GetNewFrame(size, device);
 
   const int offset = (int)(AlignPointer(res->vfb->GetWritePtr(), FRAME_ALIGN) - res->vfb->GetWritePtr()); // first line offset for proper alignment
-  const int diff = offset - src->offset;
+  const int diff = offset - srchead;
 
 	res->offset = src->offset + diff;
 	res->pitch = src->pitch;
 	res->row_size = src->row_size;
 	res->height = src->height;
-	res->offsetU = src->offsetU + diff;
-	res->offsetV = src->offsetV + diff;
+	res->offsetU = src->pitchUV ? (src->offsetU + diff) : res->offset;
+	res->offsetV = src->pitchUV ? (src->offsetV + diff) : res->offset;
 	res->pitchUV = src->pitchUV;
 	res->row_sizeUV = src->row_sizeUV;
 	res->heightUV = src->heightUV;
