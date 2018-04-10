@@ -62,7 +62,7 @@ extern const AVSFunction Conditional_filters[] = {
   {  "WriteFileStart",    BUILTIN_FUNC_PREFIX, "c[filename]sn+[append]b", Write::Create_Start }, // function input
   {  "WriteFileEnd",      BUILTIN_FUNC_PREFIX, "c[filename]sn+[append]b", Write::Create_End }, // function input
   { "UseVar", BUILTIN_FUNC_PREFIX, "cs+", UseVar::Create },
-  { "AddProp", BUILTIN_FUNC_PREFIX, "css", AddProp::Create },
+  { "AddProp", BUILTIN_FUNC_PREFIX, "csn", AddProp::Create },
   { 0 }
 };
 

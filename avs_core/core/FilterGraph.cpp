@@ -33,7 +33,7 @@ FilterGraphNode::FilterGraphNode(PClip child, const char* name,
     for (int i = 0; i < args_.ArraySize(); ++i) {
       argstmp.push_back(args_[i]);
     }
-    args = DeepCopyValue(arrays, AVSValue(argstmp.data(), argstmp.size()));
+    args = DeepCopyValue(arrays, AVSValue(argstmp.data(), (int)argstmp.size()));
   }
   else {
     args = DeepCopyValue(arrays, args_.IsArray() ? args_ : AVSValue(args_, 1));

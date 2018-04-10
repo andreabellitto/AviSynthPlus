@@ -128,10 +128,10 @@ class AddProp : public GenericVideoFilter
 {
 private:
    const char* name;
-   AVSValue eval;
+   PFunction func;
 
 public:
-   AddProp(PClip _child, const char* name, AVSValue eval, IScriptEnvironment* env);
+   AddProp(PClip _child, const char* name, const PFunction& eval, IScriptEnvironment* env);
    ~AddProp();
    PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env);
    int __stdcall SetCacheHints(int cachehints, int frame_range);
