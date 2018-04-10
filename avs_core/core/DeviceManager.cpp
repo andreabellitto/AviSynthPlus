@@ -422,6 +422,24 @@ public:
 };
 #endif
 
+class DeviceSetter {
+  InternalEnvironment* env;
+  Device* downstreamDevice;
+public:
+  DeviceSetter(InternalEnvironment* env, Device* upstreamDevice)
+    : env(env)
+  {
+    downstreamDevice = env->SetCurrentDevice(upstreamDevice);
+    if (downstreamDevice == nullptr) {
+      env->ThrowError("This thread is not created by AviSynth. It is not allowed to invoke script on this thread ...");
+    }
+  }
+  ~DeviceSetter()
+  {
+    env->SetCurrentDevice(downstreamDevice);
+  }
+};
+
 DeviceManager::DeviceManager(InternalEnvironment* env) :
   env(env)
 {
@@ -1134,21 +1152,21 @@ public:
         break;
       }
 
-      Device* downstreamDevice = env->SetCurrentDevice(upstreamDevice);
-
-      if (downstreamDevice == nullptr) {
-        env->ThrowError("This thread is not created by AviSynth. It is not allowed to invoke script on this thread ...");
-      }
+      DeviceSetter setter(env, upstreamDevice);
 
       try {
         AVSValue ret = env->Invoke(AVSValue(), func, AVSValue(nullptr, 0));
-        env->SetCurrentDevice(downstreamDevice);
         return ret;
       }
-      catch (...) {
-        env->SetCurrentDevice(downstreamDevice);
-        throw;
+      catch (IScriptEnvironment::NotFound) {
+        const char* name = (upstreamType == DEV_TYPE_CPU) ? "OnCPU" : "OnCUDA";
+        env->ThrowError(
+          "%s: Invalid function parameter type '%s'(%s)\n"
+          "Function should have no argument",
+          name, func->GetDefinition()->param_types, func->ToString(env));
       }
+
+      return AVSValue();
     }
   }
 };

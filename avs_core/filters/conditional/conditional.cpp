@@ -142,7 +142,8 @@ PVideoFrame __stdcall ConditionalSelect::GetFrame(int n, IScriptEnvironment* env
         func->GetLegacyName(), func->GetDefinition(), AVSValue(nullptr, 0), 0, envI)) 
       {
         env->ThrowError(
-          "ConditionalSelect: Invalid function parameter type '%s'(%s)",
+          "ConditionalSelect: Invalid function parameter type '%s'(%s)\n"
+          "Function should have one clip argument or no argument",
           func->GetDefinition()->param_types, func->ToString(env));
       }
     }
@@ -315,7 +316,8 @@ PVideoFrame __stdcall ConditionalFilter::GetFrame(int n, IScriptEnvironment* env
         func->GetLegacyName(), func->GetDefinition(), AVSValue(nullptr, 0), 0, envI))
       {
         env->ThrowError(
-          "ConditionalFilter: Invalid function parameter type '%s'(%s)",
+          "ConditionalFilter: Invalid function parameter type '%s'(%s)\n"
+          "Function should have one clip argument or no argument",
           func->GetDefinition()->param_types, func->ToString(env));
       }
       e2_result = true;
@@ -527,7 +529,8 @@ PVideoFrame __stdcall ScriptClip::GetFrame(int n, IScriptEnvironment* env)
         func->GetLegacyName(), func->GetDefinition(), AVSValue(nullptr, 0), 0, envI))
       {
         env->ThrowError(
-          "ScriptClip: Invalid function parameter type '%s'(%s)",
+          "ScriptClip: Invalid function parameter type '%s'(%s)\n"
+          "Function should have one clip argument or no argument",
           func->GetDefinition()->param_types, func->ToString(env));
       }
     }
