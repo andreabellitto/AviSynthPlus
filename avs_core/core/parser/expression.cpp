@@ -677,10 +677,10 @@ FunctionInstance::~FunctionInstance() {
 const char* FunctionInstance::ToString(IScriptEnvironment* env)
 {
   if (pdef->name) {
-    return env->Sprintf("Named Function: %s defined at %s, line %d", pdef->name, pdef->filename, pdef->line);
+    return env->Sprintf("Function: %s defined at %s, line %d", pdef->name, pdef->filename, pdef->line);
   }
   else {
-    return env->Sprintf("Anonymous Function: defined at %s, line %d", pdef->filename, pdef->line);
+    return env->Sprintf("Function: defined at %s, line %d", pdef->filename, pdef->line);
   }
 }
 

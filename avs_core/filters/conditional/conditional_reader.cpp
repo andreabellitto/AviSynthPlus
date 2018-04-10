@@ -793,24 +793,23 @@ PVideoFrame __stdcall AddProp::GetFrame(int n, IScriptEnvironment* env)
   env->SetGlobalVar("current_frame", (AVSValue)n);  // Set frame to be tested
 
   AVSValue result;
-  char error_msg[512];
+  const char* error_msg = nullptr;
   try {
     result = static_cast<InternalEnvironment*>(env)->Invoke(child, func, AVSValue(nullptr, 0));
-    error_msg[0] = 0;
   }
   catch (IScriptEnvironment::NotFound) {
-    sprintf_s(error_msg, "AddProp: Invalid function parameter type '%s'(%s)\n"
+    error_msg = env->Sprintf("AddProp: Invalid function parameter type '%s'(%s)\n"
       "Function should have no argument",
       func->GetDefinition()->param_types, func->ToString(env));
   }
   catch (const AvisynthError &error) {
-    sprintf_s(error_msg, "%s\nAddProp: Error in function %s",
+    error_msg = env->Sprintf("%s\nAddProp: Error in %s",
       error.msg, func->ToString(env));
   }
 
   PVideoFrame frame = child->GetFrame(n, env);
 
-  if (error_msg[0]) {
+  if (error_msg) {
     env->MakeWritable(&frame);
     env->ApplyMessage(&frame, vi, error_msg, vi.width / W_DIVISOR, 0xa0a0a0, 0, 0);
     return frame;

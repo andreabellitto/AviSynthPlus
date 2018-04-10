@@ -639,9 +639,9 @@ public:
   int __stdcall GetCPUFlags();
   char* __stdcall SaveString(const char* s, int length = -1) { return SaveString(s, length, false); }
   char* __stdcall SaveString(const char* s, int length, bool escape);
-  char* __stdcall Sprintf(const char* fmt, ...);
+  char* Sprintf(const char* fmt, ...);
   char* __stdcall VSprintf(const char* fmt, void* val);
-  void __stdcall ThrowError(const char* fmt, ...);
+  void ThrowError(const char* fmt, ...);
   void __stdcall AddFunction(const char* name, const char* params, INeoEnv::ApplyFunc apply, void* user_data = 0);
   bool __stdcall FunctionExists(const char* name);
   AVSValue __stdcall Invoke(const char* name, const AVSValue args, const char* const* arg_names=0);
