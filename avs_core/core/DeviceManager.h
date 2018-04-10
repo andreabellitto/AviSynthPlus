@@ -63,7 +63,7 @@ public:
     int GetNumDevices() const { return numDevices; }
 };
 
-void CheckChildDeviceTypes(const PClip& child, const char* name,
+void CheckChildDeviceTypes(const PClip& child, const char* name, const AVSValue& last,
   const AVSValue& args, const char* const* argnames, InternalEnvironment* env);
 
 void CopyCUDAFrame(const PVideoFrame& dst, const PVideoFrame& src, InternalEnvironment* env, bool sync = false);

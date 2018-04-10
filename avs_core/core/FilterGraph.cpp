@@ -19,18 +19,29 @@ static AVSValue DeepCopyValue(std::vector<std::unique_ptr<AVSValue[]>>& arrays, 
   return src;
 }
 
-FilterGraphNode::FilterGraphNode(PClip child, const char* name, const AVSValue& args_, const char* const* argnames_)
+FilterGraphNode::FilterGraphNode(PClip child, const char* name,
+  const AVSValue& last_, const AVSValue& args_, const char* const* argnames_)
   : child(child)
   , name(name)
 {
-  args = DeepCopyValue(arrays, args_.IsArray() ? args_ : AVSValue(args_, 1));
+  if (last_.Defined()) {
+    std::vector<AVSValue> argstmp;
+    argstmp.push_back(last_);
+    if (argnames_) {
+      argnames.push_back(std::string());
+    }
+    for (int i = 0; i < args_.ArraySize(); ++i) {
+      argstmp.push_back(args_[i]);
+    }
+    args = DeepCopyValue(arrays, AVSValue(argstmp.data(), argstmp.size()));
+  }
+  else {
+    args = DeepCopyValue(arrays, args_.IsArray() ? args_ : AVSValue(args_, 1));
+  }
 
-  argnames.resize(args.ArraySize());
   if (argnames_) {
-    for (int i = 0; i < args.ArraySize(); ++i) {
-      if (argnames_[i]) {
-        argnames[i] = argnames_[i];
-      }
+    for (int i = 0; i < args_.ArraySize(); ++i) {
+      argnames.push_back(argnames_[i] ? std::string(argnames_[i]) : std::string());
     }
   }
 }
@@ -38,7 +49,10 @@ FilterGraphNode::FilterGraphNode(PClip child, const char* name, const AVSValue& 
 class FilterGraph
 {
 protected:
-  struct ClipInfo {
+  IScriptEnvironment * env;
+
+  struct NodeInfo {
+    bool isFunction;
     int number;
     std::string name;
     std::string args;
@@ -47,37 +61,58 @@ protected:
 		int cacheSize;
 		int cacheCapacity;
 
-    ClipInfo() { }
-    ClipInfo(int number) : number(number) { }
+    NodeInfo() { }
+    NodeInfo(int number) : number(number) { }
   };
 
-  std::map<void*, ClipInfo> clipMap;
+  std::map<void*, NodeInfo> nodeMap;
 
   int DoClip(IClip* pclip) {
-    if (clipMap.find(pclip) == clipMap.end()) {
-      clipMap.insert(std::make_pair(pclip, (int)clipMap.size()));
+    if (nodeMap.find(pclip) == nodeMap.end()) {
+      nodeMap.insert(std::make_pair(pclip, (int)nodeMap.size()));
       FilterGraphNode* node = dynamic_cast<FilterGraphNode*>(pclip);
       if (node != nullptr) {
-        ClipInfo& info = clipMap[node];
+        NodeInfo& info = nodeMap[node];
+        info.isFunction = false;
         info.name = node->name;
-        info.args = DoArray(node, info, node->argnames.data(), node->args);
+        info.args = "(" + DoArray(info, nullptr, node->argnames.data(), node->args) + ")";
 				info.cacheSize = node->SetCacheHints(CACHE_GET_SIZE, 0);
 				info.cacheCapacity = node->SetCacheHints(CACHE_GET_CAPACITY, 0);
       }
-      OutClip(clipMap[node]);
+      OutClip(nodeMap[node]);
     }
-    return clipMap[pclip].number;
+    return nodeMap[pclip].number;
   }
 
-  std::string DoArray(FilterGraphNode* node, ClipInfo& info, std::string* argnames, const AVSValue& arr) {
+  int DoFunc(IFunction* pfunc) {
+    if (nodeMap.find(pfunc) == nodeMap.end()) {
+      nodeMap.insert(std::make_pair(pfunc, (int)nodeMap.size()));
+      NodeInfo& info = nodeMap[pfunc];
+      info.isFunction = true;
+      auto captures = pfunc->GetCaptures();
+      info.name = pfunc->ToString(env);
+      info.args = "[" + DoArray(info, captures.var_names, nullptr, AVSValue(captures.var_data, captures.count)) + "]";
+      info.cacheSize = 0;
+      info.cacheCapacity = 0;
+      OutFunc(info);
+    }
+    return nodeMap[pfunc].number;
+  }
+
+  std::string DoArray(NodeInfo& info, const char** argnames_c, std::string* argnames_s, const AVSValue& arr) {
     std::stringstream ss;
-    ss << "(";
+    int breakpos = 0;
+    int maxlen = 60;
+
     for (int i = 0; i < arr.ArraySize(); ++i) {
       if (i != 0) {
         ss << ",";
       }
-      if (argnames && argnames[i].size() > 0) {
-        ss << argnames[i] << "=";
+      if (argnames_c && argnames_c[i]) {
+        ss << argnames_c[i] << "=";
+      }
+      if (argnames_s && argnames_s[i].size() > 0) {
+        ss << argnames_s[i] << "=";
       }
       const AVSValue& v = arr[i];
       if (!v.Defined()) {
@@ -89,8 +124,14 @@ protected:
         ss << "clip" << (clipnum + 1);
         info.refNodes.push_back(pclip);
       }
+      else if (v.IsFunction()) {
+        IFunction* pfunc = (IFunction*)(void*)v.AsFunction();
+        int funcnum = DoFunc(pfunc);
+        ss << "func" << (funcnum + 1);
+        info.refNodes.push_back(pfunc);
+      }
       else if (v.IsArray()) {
-        ss << OutArray(DoArray(node, info, nullptr, v));
+        ss << OutArray("(" + DoArray(info, nullptr, nullptr, v) + ")");
       }
       else if (v.IsBool()) {
         ss << (v.AsBool() ? "True" : "False");
@@ -107,52 +148,24 @@ protected:
       else {
         ss << "<error>";
       }
+      if ((int)ss.tellp() - breakpos > maxlen) {
+        ss << "\n";
+        breakpos = (int)ss.tellp();
+      }
     }
-    ss << ")";
     return ss.str();
   }
 
-  virtual void OutClip(const ClipInfo& info) = 0;
+  virtual void OutClip(const NodeInfo& info) = 0;
+  virtual void OutFunc(const NodeInfo& info) = 0;
   virtual std::string OutArray(const std::string& args) = 0;
 
 public:
-  int Construct(FilterGraphNode* root) {
-    clipMap.clear();
+  int Construct(FilterGraphNode* root, IScriptEnvironment* env_)
+  {
+    env = env_;
+    nodeMap.clear();
     return DoClip(root);
-  }
-};
-
-class AvsScriptFilterGraph : private FilterGraph
-{
-  std::stringstream ss;
-
-protected:
-  virtual void OutClip(const ClipInfo& info) {
-    int num = info.number + 1;
-    if (info.name.size() == 0) {
-      ss << "clip" << num << ": Failed to get information" << std::endl;
-    }
-    else {
-      ss << "clip" << num << " = " << info.name << info.args << std::endl;
-    }
-  }
-
-  int nextArrayNumber = 0;
-  virtual std::string OutArray(const std::string& args) {
-    std::string name = std::string("array") + std::to_string(++nextArrayNumber);
-    ss << name;
-    ss << " = ArrayCreate" << args << std::endl;
-    return name;
-  }
-public:
-
-  void Construct(FilterGraphNode* root) {
-    int last = FilterGraph::Construct(root);
-    ss << "return clip" << (last + 1) << std::endl;
-  }
-
-  std::string GetOutput() {
-    return ss.str();
   }
 };
 
@@ -164,13 +177,55 @@ static void ReplaceAll(std::string& str, const std::string& from, const std::str
   }
 }
 
+class AvsScriptFilterGraph : private FilterGraph
+{
+  std::stringstream ss;
+
+protected:
+  virtual void OutClip(const NodeInfo& info) {
+    int num = info.number + 1;
+    if (info.name.size() == 0) {
+      ss << "clip" << num << ": Failed to get information" << std::endl;
+    }
+    else {
+      auto args = info.args;
+      ReplaceAll(args, "\n", "");
+      ss << "clip" << num << " = " << info.name << args << std::endl;
+    }
+  }
+  virtual void OutFunc(const NodeInfo& info) {
+    int num = info.number + 1;
+    auto args = info.args;
+    ReplaceAll(args, "\n", "");
+    ss << "func" << num << " = function" << args << "(){ " << info.name << " }" << std::endl;
+  }
+
+  int nextArrayNumber = 0;
+  virtual std::string OutArray(const std::string& args) {
+    std::string name = std::string("array") + std::to_string(++nextArrayNumber);
+    ss << name;
+    ss << " = ArrayCreate" << args << std::endl;
+    return name;
+  }
+public:
+
+  void Construct(FilterGraphNode* root, IScriptEnvironment* env) {
+    int last = FilterGraph::Construct(root, env);
+    ss << "return clip" << (last + 1) << std::endl;
+  }
+
+  std::string GetOutput() {
+    return ss.str();
+  }
+};
+
 class DotFilterGraph : private FilterGraph
 {
   bool enableArgs;
   std::stringstream ss;
 
 protected:
-  virtual void OutClip(const ClipInfo& info) {
+  virtual void OutClip(const NodeInfo& info) {
     int num = info.number + 1;
     ss << "clip" << num;
     if (info.name.size() == 0) {
@@ -181,6 +236,7 @@ protected:
         std::string label = info.name + info.args;
         ReplaceAll(label, "\\", "\\\\");
         ReplaceAll(label, "\"", "\\\"");
+        ReplaceAll(label, "\n", "\\n");
         ss << " [label = \"" << label << "\"];" << std::endl;
       }
       else {
@@ -193,8 +249,38 @@ protected:
       }
     }
     for (void* pclip : info.refNodes) {
-      int refnum = clipMap[pclip].number + 1;
-      ss << "clip" << refnum << " -> " << "clip" << num << ";" << std::endl;
+      auto& node = nodeMap[pclip];
+      int refnum = node.number + 1;
+      if (node.isFunction) {
+        ss << "func" << refnum << " -> " << "clip" << num << ";" << std::endl;
+      }
+      else {
+        ss << "clip" << refnum << " -> " << "clip" << num << ";" << std::endl;
+      }
+    }
+  }
+  virtual void OutFunc(const NodeInfo& info) {
+    int num = info.number + 1;
+    ss << "func" << num;
+    if (enableArgs) {
+      std::string label = info.name + "\n" + info.args;
+      ReplaceAll(label, "\\", "\\\\");
+      ReplaceAll(label, "\"", "\\\"");
+      ReplaceAll(label, "\n", "\\n");
+      ss << " [label = \"" << label << "\"];" << std::endl;
+    }
+    else {
+      ss << " [label = \"" << info.name << "\"];" << std::endl;
+    }
+    for (void* pclip : info.refNodes) {
+      auto& node = nodeMap[pclip];
+      int refnum = node.number + 1;
+      if (node.isFunction) {
+        ss << "func" << refnum << " -> " << "func" << num << ";" << std::endl;
+      }
+      else {
+        ss << "clip" << refnum << " -> " << "func" << num << ";" << std::endl;
+      }
     }
   }
 
@@ -207,11 +293,11 @@ protected:
   }
 public:
 
-  void Construct(FilterGraphNode* root, bool enableArgs) {
+  void Construct(FilterGraphNode* root, bool enableArgs, IScriptEnvironment* env) {
     this->enableArgs = enableArgs;
     ss << "digraph avs_filter_graph {" << std::endl;
     ss << "node [ shape = box ];" << std::endl;
-    int last = FilterGraph::Construct(root);
+    int last = FilterGraph::Construct(root, env);
     ss << "GOAL;" << std::endl;
     ss << "clip" << (last + 1) << " -> GOAL" << std::endl;
     ss << "}" << std::endl;
@@ -230,12 +316,12 @@ static void DoDumpGraph(PClip clip, int mode, const char* path, IScriptEnvironme
 
 	if (mode == 0) {
 		AvsScriptFilterGraph graph;
-		graph.Construct(root);
+		graph.Construct(root, env);
 		ret = graph.GetOutput();
 	}
 	else if (mode == 1 || mode == 2) {
 		DotFilterGraph graph;
-		graph.Construct(root, mode == 1);
+		graph.Construct(root, mode == 1, env);
 		ret = graph.GetOutput();
 	}
 	else {

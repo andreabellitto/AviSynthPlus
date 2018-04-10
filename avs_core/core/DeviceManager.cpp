@@ -74,10 +74,10 @@ std::string DeviceTypesString(int devicetypes)
   return oss.str();
 }
 
-static void CheckDeviceTypes(const char* name, int devicetypes, const AVSValue& arr, InternalEnvironment* env)
+static void CheckDeviceTypes(const char* name, int devicetypes, const AVSValue& last, const AVSValue& arr, InternalEnvironment* env)
 {
-  for (int i = 0; i < arr.ArraySize(); ++i) {
-    const AVSValue& val = arr[i];
+  for (int i = -1; i < arr.ArraySize(); ++i) {
+    const AVSValue& val = (i == -1) ? last : arr[i];
     if (val.IsClip()) {
       int childtypes = GetDeviceTypes(val.AsClip());
       if ((devicetypes & childtypes) == 0) {
@@ -89,19 +89,19 @@ static void CheckDeviceTypes(const char* name, int devicetypes, const AVSValue& 
       }
     }
     else if (val.IsArray()) {
-      CheckDeviceTypes(name, devicetypes, val, env);
+      CheckDeviceTypes(name, devicetypes, AVSValue(), val, env);
     }
   }
 }
 
-void CheckChildDeviceTypes(const PClip& clip, const char* name, const AVSValue& args, const char* const* argnames, InternalEnvironment* env)
+void CheckChildDeviceTypes(const PClip& clip, const char* name, const AVSValue& last, const AVSValue& args, const char* const* argnames, InternalEnvironment* env)
 {
   int deviceflags = GetTargetDeviceTypes(clip);
   if (args.IsArray()) {
-    CheckDeviceTypes(name, deviceflags, args, env);
+    CheckDeviceTypes(name, deviceflags, last, args, env);
   }
   else {
-    CheckDeviceTypes(name, deviceflags, AVSValue(&args, 1), env);
+    CheckDeviceTypes(name, deviceflags, last, AVSValue(&args, 1), env);
   }
 }
 

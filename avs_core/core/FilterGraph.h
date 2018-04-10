@@ -18,7 +18,7 @@ class FilterGraphNode : public IClip
 
   friend FilterGraph;
 public:
-  FilterGraphNode(PClip child, const char* name, const AVSValue& args, const char* const* arg_names);
+  FilterGraphNode(PClip child, const char* name, const AVSValue& last, const AVSValue& args, const char* const* arg_names);
 
   virtual int __stdcall GetVersion() { return child->GetVersion(); }
   virtual PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env)

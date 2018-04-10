@@ -3094,12 +3094,14 @@ bool __stdcall ScriptEnvironment::Invoke_(AVSValue *result, const AVSValue& impl
     // static device check
     // this is not enough to check all dependencies but much helpful to users
     if ((*result).IsClip()) {
-      CheckChildDeviceTypes((*result).AsClip(), name, args, arg_names, this);
+      auto last = (argbase == 0) ? implicit_last : AVSValue();
+      CheckChildDeviceTypes((*result).AsClip(), name, last, args, arg_names, this);
     }
 
     // filter graph
     if (graphAnalysisEnable && (*result).IsClip()) {
-      *result = new FilterGraphNode((*result).AsClip(), name, args, arg_names);
+      auto last = (argbase == 0) ? implicit_last : AVSValue();
+      *result = new FilterGraphNode((*result).AsClip(), f->name, last, args, arg_names);
     }
 
     // args2 and args3 are not valid after this point anymore
