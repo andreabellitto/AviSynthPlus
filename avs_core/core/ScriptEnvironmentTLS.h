@@ -314,7 +314,11 @@ public:
     const char* name, const Function *f, const AVSValue& args, const char* const* arg_names,
     IScriptEnvironment* env_thread)
   {
-    return core->Invoke_(result, implicit_last, name, f, args, arg_names, this);
+    // when env_thread != null, this is called by another ScriptEnvironmentTLS.
+    if (env_thread == nullptr) {
+      env_thread = this;
+    }
+    return core->Invoke_(result, implicit_last, name, f, args, arg_names, env_thread);
   }
 
   bool __stdcall MakeWritable(PVideoFrame* pvf)

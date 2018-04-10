@@ -776,7 +776,7 @@ private:
 	long EnvCount; // for ScriptEnvironmentTLS leak detection
 
   const Function* Lookup(const char* search_name, const AVSValue* args, size_t num_args,
-                      bool &pstrict, size_t args_names_count, const char* const* arg_names);
+                      bool &pstrict, size_t args_names_count, const char* const* arg_names, IScriptEnvironment* env_thread);
   bool CheckArguments(const Function* f, const AVSValue* args, size_t num_args,
                       bool &pstrict, size_t args_names_count, const char* const* arg_names);
   void EnsureMemoryLimit(size_t request, Device* device);
@@ -2568,10 +2568,10 @@ static size_t Flatten(const AVSValue& src, AVSValue* dst, size_t index, int leve
 }
 
 const Function* ScriptEnvironment::Lookup(const char* search_name, const AVSValue* args, size_t num_args,
-                    bool &pstrict, size_t args_names_count, const char* const* arg_names)
+                    bool &pstrict, size_t args_names_count, const char* const* arg_names, IScriptEnvironment* ctx)
 {
   AVSValue avsv;
-  if (GetVar(search_name, &avsv) && avsv.IsFunction()) {
+  if (static_cast<IScriptEnvironment2*>(ctx)->GetVar(search_name, &avsv) && avsv.IsFunction()) {
     auto& funcv = avsv.AsFunction();
     const char* name = funcv->GetLegacyName();
     const Function* func = funcv->GetDefinition();
@@ -2622,7 +2622,7 @@ const Function* ScriptEnvironment::Lookup(const char* search_name, const AVSValu
   if (!plugin_manager->HasAutoloadExecuted())
   {
     plugin_manager->AutoloadPlugins();
-    return Lookup(search_name, args, num_args, pstrict, args_names_count, arg_names);
+    return Lookup(search_name, args, num_args, pstrict, args_names_count, arg_names, ctx);
   }
 
   return NULL;
@@ -2705,14 +2705,18 @@ bool __stdcall ScriptEnvironment::Invoke_(AVSValue *result, const AVSValue& impl
   const char* name, const Function *f, const AVSValue& args, const char* const* arg_names,
   IScriptEnvironment* env_thread)
 {
-	if (env_thread == nullptr && g_thread_id != 0) {
-		ThrowError("Invalid ScriptEnvironment. You are using different thread's environment.");
-	}
+  // When invoked from GetFrame/GetAudio, skip all cache and mt mecanism
+  bool is_runtime = true;
 
-	if (g_getframe_recursive_count != 0) {
-		// Invoked from GetFrame/GetAudio, skip all cache and mt mecanism
+  if (env_thread == nullptr) { // not called by thread
+    if (g_thread_id != 0) {
+      ThrowError("Invalid ScriptEnvironment. You are using different thread's environment.");
+    }
+    if (g_getframe_recursive_count == 0) { // not called by GetFrame
+      is_runtime = false;
+    }
     env_thread = this;
-	}
+  }
 
   const int args_names_count = (arg_names && args.IsArray()) ? args.ArraySize() : 0;
 
@@ -2745,11 +2749,11 @@ bool __stdcall ScriptEnvironment::Invoke_(AVSValue *result, const AVSValue& impl
   }
   else {
     // find matching function
-    f = this->Lookup(name, args2.data() + 1, args2_count, strict, args_names_count, arg_names);
+    f = this->Lookup(name, args2.data() + 1, args2_count, strict, args_names_count, arg_names, env_thread);
     if (!f) {
       if (!implicit_last.Defined())
         return false;
-      f = this->Lookup(name, args2.data(), args2_count + 1, strict, args_names_count, arg_names);
+      f = this->Lookup(name, args2.data(), args2_count + 1, strict, args_names_count, arg_names, env_thread);
       if (!f)
         return false;
       argbase = 0;
@@ -2844,7 +2848,7 @@ bool __stdcall ScriptEnvironment::Invoke_(AVSValue *result, const AVSValue& impl
   args3.resize(args3_count);
   std::vector<AVSValue>(args3).swap(args3);
 
-  if(env_thread) {
+  if(is_runtime) {
     // Invoked by a thread or GetFrame
     AVSValue funcArgs(args3.data(), (int)args3.size());
     *result = f->apply(funcArgs, f->user_data, env_thread);

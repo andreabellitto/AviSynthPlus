@@ -181,6 +181,7 @@ public:
 
   virtual void __stdcall UpdateFunctionExports(const char* funcName, const char* funcParams, const char *exportVar) = 0;
 
+  // other than ScriptEnvironment, env_thread should be nullptr
   virtual bool __stdcall Invoke_(AVSValue *result, const AVSValue& implicit_last,
     const char* name, const Function *f, const AVSValue& args, const char* const* arg_names,
     IScriptEnvironment* env_thread) = 0;

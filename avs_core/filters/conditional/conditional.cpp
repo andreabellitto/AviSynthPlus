@@ -139,7 +139,7 @@ PVideoFrame __stdcall ConditionalSelect::GetFrame(int n, IScriptEnvironment* env
     else {
       auto& func = script.AsFunction();
       if (!envI->Invoke_(&result, child_val,
-        func->GetLegacyName(), func->GetDefinition(), AVSValue(nullptr, 0), 0, envI)) 
+        func->GetLegacyName(), func->GetDefinition(), AVSValue(nullptr, 0), 0, nullptr)) 
       {
         env->ThrowError(
           "ConditionalSelect: Invalid function parameter type '%s'(%s)\n"
@@ -313,7 +313,7 @@ PVideoFrame __stdcall ConditionalFilter::GetFrame(int n, IScriptEnvironment* env
     else {
       auto& func = eval1.AsFunction();
       if (!envI->Invoke_(&e1_result, child_val,
-        func->GetLegacyName(), func->GetDefinition(), AVSValue(nullptr, 0), 0, envI))
+        func->GetLegacyName(), func->GetDefinition(), AVSValue(nullptr, 0), 0, nullptr))
       {
         env->ThrowError(
           "ConditionalFilter: Invalid function parameter type '%s'(%s)\n"
@@ -526,7 +526,7 @@ PVideoFrame __stdcall ScriptClip::GetFrame(int n, IScriptEnvironment* env)
     else {
       auto& func = script.AsFunction();
       if (!envI->Invoke_(&result, child_val, 
-        func->GetLegacyName(), func->GetDefinition(), AVSValue(nullptr, 0), 0, envI))
+        func->GetLegacyName(), func->GetDefinition(), AVSValue(nullptr, 0), 0, nullptr))
       {
         env->ThrowError(
           "ScriptClip: Invalid function parameter type '%s'(%s)\n"
