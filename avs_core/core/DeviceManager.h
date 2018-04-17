@@ -63,6 +63,14 @@ public:
     int GetNumDevices() const { return numDevices; }
 };
 
+class DeviceSetter {
+  InternalEnvironment* env;
+  Device* downstreamDevice;
+public:
+  DeviceSetter(InternalEnvironment* env, Device* upstreamDevice);
+  ~DeviceSetter();
+};
+
 void CheckChildDeviceTypes(const PClip& child, const char* name, const AVSValue& last,
   const AVSValue& args, const char* const* argnames, InternalEnvironment* env);
 

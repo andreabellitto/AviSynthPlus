@@ -1693,6 +1693,7 @@ public:
   virtual void* __stdcall GetDeviceStream() const = 0;
   virtual void __stdcall DeviceAddCallback(void(*cb)(void*), void* user_data) = 0;
 
+  virtual PVideoFrame __stdcall GetFrame(PClip c, int n, const PDevice& device) = 0;
 };
 
 // support inteface conversion

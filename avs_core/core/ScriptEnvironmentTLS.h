@@ -189,6 +189,13 @@ public:
     currentDevice->AddCompleteCallback(cbdata);
   }
 
+  virtual PVideoFrame __stdcall GetFrame(PClip c, int n, const PDevice& device)
+  {
+    CHECK_THREAD;
+    DeviceSetter setter(this, (Device*)(void*)device);
+    return c->GetFrame(n, this);
+  }
+
 
   /* ---------------------------------------------------------------------------------
    *             S T U B S

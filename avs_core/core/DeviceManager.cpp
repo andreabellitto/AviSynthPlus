@@ -237,8 +237,8 @@ public:
     if (initialized.load(std::memory_order_acquire) == false) {
       std::lock_guard<std::mutex> lock(mutex);
       if (initialized.load(std::memory_order_relaxed) == false) {
-        //cuda_enabled = (onDeviceCount[DEV_TYPE_CUDA] > 0);
-        cuda_enabled = false;
+        cuda_enabled = (onDeviceCount[DEV_TYPE_CUDA] > 0);
+        //cuda_enabled = false;
         initialized.store(true, std::memory_order_release);
       }
     }
@@ -422,24 +422,6 @@ public:
 };
 #endif
 
-class DeviceSetter {
-  InternalEnvironment* env;
-  Device* downstreamDevice;
-public:
-  DeviceSetter(InternalEnvironment* env, Device* upstreamDevice)
-    : env(env)
-  {
-    downstreamDevice = env->SetCurrentDevice(upstreamDevice);
-    if (downstreamDevice == nullptr) {
-      env->ThrowError("This thread is not created by AviSynth. It is not allowed to invoke script on this thread ...");
-    }
-  }
-  ~DeviceSetter()
-  {
-    env->SetCurrentDevice(downstreamDevice);
-  }
-};
-
 DeviceManager::DeviceManager(InternalEnvironment* env) :
   env(env)
 {
@@ -491,6 +473,20 @@ Device* DeviceManager::GetDevice(AvsDeviceType device_type, int device_index) co
     env->ThrowError("Not supported memory type %d", device_type);
   }
   return nullptr;
+}
+
+DeviceSetter::DeviceSetter(InternalEnvironment* env, Device* upstreamDevice)
+  : env(env)
+{
+  downstreamDevice = env->SetCurrentDevice(upstreamDevice);
+  if (downstreamDevice == nullptr) {
+    env->ThrowError("This thread is not created by AviSynth. It is not allowed to invoke script on this thread ...");
+  }
+}
+
+DeviceSetter::~DeviceSetter()
+{
+  env->SetCurrentDevice(downstreamDevice);
 }
 
 class QueuePrefetcher
@@ -1198,6 +1194,12 @@ void CopyCUDAFrame(const PVideoFrame& dst, const PVideoFrame& src, InternalEnvir
   else {
     CUDA_CHECK(cudaMemcpyAsync(dstptr, srcptr, sz, kind));
   }
+}
+
+PVideoFrame GetFrameOnDevice(PClip& c, int n, const PDevice& device, InternalEnvironment* env)
+{
+  DeviceSetter setter(env, (Device*)(void*)device);
+  return c->GetFrame(n, env);
 }
 
 extern const AVSFunction Device_filters[] = {

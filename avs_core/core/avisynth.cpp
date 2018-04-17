@@ -68,6 +68,9 @@
   #define YieldProcessor() __nop(void)
 #endif
 
+#define CHECK_THREAD if(g_thread_id != 0) \
+	throw AvisynthError("Invalid ScriptEnvironment. You are using different thread's environment.")
+
 extern const AVSFunction Audio_filters[], Combine_filters[], Convert_filters[],
                    Convolution_filters[], Edit_filters[], Field_filters[],
                    Focus_filters[], Fps_filters[], Histogram_filters[],
@@ -731,6 +734,8 @@ public:
   virtual void* __stdcall GetDeviceStream() const { return GetCurrentDevice()->GetComputeStream(); }
   virtual void __stdcall DeviceAddCallback(void(*cb)(void*), void* user_data);
   virtual int __stdcall SetMemoryMax(AvsDeviceType type, int index, int mem);
+
+  virtual PVideoFrame __stdcall GetFrame(PClip c, int n, const PDevice& device);
 
   virtual InternalEnvironment* __stdcall GetCoreEnvironment() { return this; }
   virtual PVideoFrame __stdcall GetOnDeviceFrame(const PVideoFrame& src, Device* device);
@@ -2709,9 +2714,7 @@ bool __stdcall ScriptEnvironment::Invoke_(AVSValue *result, const AVSValue& impl
   bool is_runtime = true;
 
   if (env_thread == nullptr) { // not called by thread
-    if (g_thread_id != 0) {
-      ThrowError("Invalid ScriptEnvironment. You are using different thread's environment.");
-    }
+    CHECK_THREAD;
     if (g_getframe_recursive_count == 0) { // not called by GetFrame
       is_runtime = false;
     }
@@ -3237,9 +3240,7 @@ Device* ScriptEnvironment::SetCurrentDevice(Device* device)
 
 Device* ScriptEnvironment::GetCurrentDevice() const
 {
-	if (g_thread_id != 0) {
-		throw AvisynthError("Invalid ScriptEnvironment. You are using different thread's environment.");
-	}
+  CHECK_THREAD;
 	return currentDevice;
 }
 
@@ -3250,11 +3251,16 @@ PDevice ScriptEnvironment::GetDevice(AvsDeviceType device_type, int device_index
 
 void ScriptEnvironment::DeviceAddCallback(void(*cb)(void*), void* user_data)
 {
-  if (g_thread_id != 0) {
-    ThrowError("Invalid ScriptEnvironment. You are using different thread's environment.");
-  }
+  CHECK_THREAD;
   DeviceCompleteCallbackData cbdata = { cb, user_data };
   currentDevice->AddCompleteCallback(cbdata);
+}
+
+PVideoFrame ScriptEnvironment::GetFrame(PClip c, int n, const PDevice& device)
+{
+  CHECK_THREAD;
+  DeviceSetter setter(this, (Device*)(void*)device);
+  return c->GetFrame(n, this);
 }
 
 int ScriptEnvironment::SetMemoryMax(AvsDeviceType type, int index, int mem)
@@ -3264,6 +3270,14 @@ int ScriptEnvironment::SetMemoryMax(AvsDeviceType type, int index, int mem)
 
 PVideoFrame ScriptEnvironment::GetOnDeviceFrame(const PVideoFrame& src, Device* device)
 {
+#ifdef SIZETMOT
+  typedef size_t offset_t;
+  typedef ptrdiff_t diff_t;
+#else
+  typedef int offset_t;
+  typedef int diff_t;
+#endif
+
   size_t srchead = GetFrameHead(src);
 
   // make space for alignment
@@ -3271,8 +3285,8 @@ PVideoFrame ScriptEnvironment::GetOnDeviceFrame(const PVideoFrame& src, Device* 
 
 	VideoFrame *res = GetNewFrame(size, device);
 
-  const int offset = (int)(AlignPointer(res->vfb->GetWritePtr(), FRAME_ALIGN) - res->vfb->GetWritePtr()); // first line offset for proper alignment
-  const int diff = offset - srchead;
+  const diff_t offset = (diff_t)(AlignPointer(res->vfb->GetWritePtr(), FRAME_ALIGN) - res->vfb->GetWritePtr()); // first line offset for proper alignment
+  const diff_t diff = offset - (diff_t)srchead;
 
 	res->offset = src->offset + diff;
 	res->pitch = src->pitch;
