@@ -577,12 +577,32 @@ void VideoFrame::SetProperty(const char* key, const AVSMapValue& value) {
 }
 
 const AVSMapValue* VideoFrame::GetProperty(const char* key) const {
+  std::unique_lock<std::mutex> global_lock(avsmap->mutex);
   auto it = avsmap->data.find(key);
   if (it == avsmap->data.end()) return nullptr;
   return &it->second;
 }
 
+PVideoFrame VideoFrame::GetProperty(const char* key, PVideoFrame def) const {
+  auto val = GetProperty(key);
+  if (val && val->IsFrame()) return val->GetFrame();
+  return def;
+}
+
+int VideoFrame::GetProperty(const char* key, int def) const {
+  auto val = GetProperty(key);
+  if (val && val->IsInt()) return (int)val->GetInt();
+  return def;
+}
+
+double VideoFrame::GetProperty(const char* key, double def) const {
+  auto val = GetProperty(key);
+  if (val && val->IsFloat()) return val->GetFloat();
+  return def;
+}
+
 bool VideoFrame::DeleteProperty(const char* key) {
+  std::unique_lock<std::mutex> global_lock(avsmap->mutex);
 	return (avsmap->data.erase(key) > 0);
 }
 
@@ -1331,7 +1351,12 @@ static const AVS_Linkage avs_linkage = {    // struct AVS_Linkage {
   &GetAvsEnv,
   &VideoFrame::SetProperty,
   &VideoFrame::GetProperty,
+  &VideoFrame::GetProperty,
+  &VideoFrame::GetProperty,
+  &VideoFrame::GetProperty,
   &VideoFrame::DeleteProperty,
+  &VideoFrame::GetDevice,
+  &VideoFrame::CheckMemory,
 
   // class AVSMapValue
   &AVSMapValue::CONSTRUCTOR0,
@@ -1372,9 +1397,6 @@ static const AVS_Linkage avs_linkage = {    // struct AVS_Linkage {
   &PDevice::GetIndex,
   &PDevice::GetName,
   // end class PDevice
-
-  &VideoFrame::GetDevice,
-  &VideoFrame::CheckMemory,
 
 // this part should be identical with struct AVS_Linkage in avisynth.h
 
