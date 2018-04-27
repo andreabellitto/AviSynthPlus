@@ -96,6 +96,9 @@ PExpression ScriptParser::ParseFunctionDefinition(void)
 
   // variable capture
   if (tokenizer.IsOperator('[')) {
+	if(name != nullptr) {
+		env->ThrowError("Script error: variable capture is not supported on legacy function definition.");
+	}
     tokenizer.NextToken();
     bool need_comma = false;
     for (;;) {
@@ -187,6 +190,15 @@ PExpression ScriptParser::ParseFunctionDefinition(void)
   PExpression body = new ExpRootBlock(ParseBlock(true, NULL));
   
   const char* saved_param_names = env->SaveString(param_types);
+
+
+  if(name != nullptr) {
+	// legacy function definition
+    ScriptFunction* sf = new ScriptFunction(body, param_floats, param_names, param_count);
+    env->AtExit(ScriptFunction::Delete, sf);
+    env->AddFunction(name, saved_param_names, ScriptFunction::Execute, sf, "$UserFunctions$");
+    return new ExpLegacyFunctionDefinition();
+  }
 
   if (name) {
     auto envi = static_cast<InternalEnvironment*>(env);

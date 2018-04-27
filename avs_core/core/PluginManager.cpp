@@ -270,6 +270,7 @@ bool AVSFunction::IsScriptFunction(const Function* func)
   //  return true;
 #endif
   return ( (func->apply == &(FunctionInstance::Execute_))
+  		  || (func->apply == &(ScriptFunction::Execute))
 		  || (func->apply == &Eval)
           || (func->apply == &EvalOop)
           || (func->apply == &Import)

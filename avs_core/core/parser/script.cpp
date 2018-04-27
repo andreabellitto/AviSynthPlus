@@ -287,6 +287,51 @@ extern const AVSFunction Script_functions[] = {
 };
 
 
+
+/**********************************
+ *******   Script Function   ******
+ *********************************/
+
+ScriptFunction::ScriptFunction( const PExpression& _body, const bool* _param_floats,
+                                const char** _param_names, int param_count )
+  : body(_body)
+{
+  param_floats = new bool[param_count];
+  memcpy(param_floats, _param_floats, param_count*sizeof(const bool));
+
+  param_names = new const char*[param_count];
+  memcpy(param_names, _param_names, param_count*sizeof(const char*));
+}
+
+
+AVSValue ScriptFunction::Execute(AVSValue args, void* user_data, IScriptEnvironment* env)
+{
+  ScriptFunction* self = (ScriptFunction*)user_data;
+  env->PushContext();
+  for (int i=0; i<args.ArraySize(); ++i)
+    env->SetVar( self->param_names[i], // Force float args that are actually int to be float
+	            (self->param_floats[i] && args[i].IsInt()) ? float(args[i].AsInt()) : args[i]);
+
+  AVSValue result;
+  try {
+    result = self->body->Evaluate(env);
+  }
+  catch(...) {
+    env->PopContext();
+    throw;
+  }
+
+  env->PopContext();
+  return result;
+}
+
+void ScriptFunction::Delete(void* self, IScriptEnvironment*)
+{
+    delete (ScriptFunction*)self;
+}
+
+
+
 /***********************************
  *******   Helper Functions   ******
  **********************************/
