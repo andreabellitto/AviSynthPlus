@@ -365,7 +365,7 @@ static AVSValue DumpFilterGraph(AVSValue args, void* user_data, IScriptEnvironme
   PClip clip = args[0].AsClip();
   FilterGraphNode* root = dynamic_cast<FilterGraphNode*>((IClip*)(void*)clip);
   if (root == nullptr) {
-    env->ThrowError("clip is not a FilterChainNode. Ensure that you enabled the chain analysis by SetChainAnalysis(true).");
+    env->ThrowError("clip is not a FilterChainNode. Ensure you have enabled the chain analysis by SetChainAnalysis(true).");
   }
 
 	int mode = args[2].AsInt(0);

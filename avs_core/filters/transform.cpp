@@ -313,7 +313,7 @@ PVideoFrame Crop::GetFrame(int n, IScriptEnvironment* env_)
   else
     _align = this->align & (size_t)srcp0;
 
-  // Ignore alignment for CUDA. Clip should be explicitly aligned by Aling()
+  // Ignore alignment for CUDA. Clip should be explicitly aligned by Align()
   if (0 != _align && (env->GetDeviceType() == DEV_TYPE_CPU)) {
     PVideoFrame dst = static_cast<IScriptEnvironment*>(env)->NewVideoFrame(vi, (int)align+1);
 

@@ -1347,7 +1347,7 @@ static const AVS_Linkage avs_linkage = {    // struct AVS_Linkage {
   NULL,                                     //   reserved for AviSynth+
   NULL,                                     //   reserved for AviSynth+
 /**********************************************************************/
-  // AviSynth+CUDA additions
+  // AviSynth Neo additions
   &GetAvsEnv,
   &VideoFrame::SetProperty,
   &VideoFrame::GetProperty,

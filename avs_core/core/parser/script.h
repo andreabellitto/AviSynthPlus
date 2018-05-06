@@ -254,6 +254,7 @@ AVSValue SetFilterMTMode (AVSValue args, void*, IScriptEnvironment* env);
 AVSValue SetLogParams(AVSValue args, void*, IScriptEnvironment* env);
 AVSValue LogMsg(AVSValue args, void*, IScriptEnvironment* env);
 AVSValue SetCacheMode(AVSValue args, void*, IScriptEnvironment* env);
+AVSValue SetDeviceOpt(AVSValue args, void*, IScriptEnvironment* env);
 
 AVSValue SetMemoryMax(AVSValue args, void*, IScriptEnvironment* env);
 

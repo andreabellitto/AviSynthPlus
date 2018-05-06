@@ -136,12 +136,9 @@ size_t GetFrameTail(const PVideoFrame& vf)
 }
 
 class CPUDevice : public Device {
-protected:
-  int onDeviceCount[4];
 public:
   CPUDevice(InternalEnvironment* env)
     : Device(DEV_TYPE_CPU, 0, 0, env)
-    , onDeviceCount()
   { }
 
   virtual int SetMemoryMax(int mem)
@@ -208,41 +205,29 @@ public:
     return nullptr;
   }
 
-  void IncrementDevice(AvsDeviceType type) {
-    if (type >= 0 && type < 4) {
-      onDeviceCount[type]++;
-    }
+  virtual void SetDeviceOpt(DeviceOpt opt, InternalEnvironment* env)
+  {
+    // do nothing
   }
 };
 
 #ifdef ENABLE_CUDA
 class CUDACPUDevice : public CPUDevice {
   int num_cuda_devices;
-  //cudaDeviceProp prop;
-  std::atomic<bool> initialized;
-  std::mutex mutex;
-  bool cuda_enabled;
+  bool allocated;
+  bool enable_pinned;
 public:
   CUDACPUDevice(InternalEnvironment* env, int num_cuda_devices)
     : CPUDevice(env)
     , num_cuda_devices(num_cuda_devices)
-    , initialized()
-  {
-    //CUDA_CHECK(cudaGetDeviceProperties(&prop, 0));
-  }
+    , allocated()
+    , enable_pinned()
+  { }
 
   virtual BYTE* Allocate(size_t size)
   {
-    // double checked locking
-    if (initialized.load(std::memory_order_acquire) == false) {
-      std::lock_guard<std::mutex> lock(mutex);
-      if (initialized.load(std::memory_order_relaxed) == false) {
-        cuda_enabled = (onDeviceCount[DEV_TYPE_CUDA] > 0);
-        //cuda_enabled = false;
-        initialized.store(true, std::memory_order_release);
-      }
-    }
-    if (!cuda_enabled) {
+    allocated = true;
+    if (!enable_pinned) {
       return CPUDevice::Allocate(size);
     }
     //unsigned int flags = (prop.canMapHostMemory && prop.unifiedAddressing)
@@ -279,7 +264,7 @@ public:
 
   virtual void Free(BYTE* ptr)
   {
-    if (!cuda_enabled) {
+    if (!enable_pinned) {
       CPUDevice::Free(ptr);
     }
     else {
@@ -290,6 +275,18 @@ public:
   }
 
   virtual const char* GetName() const { return "CPU(CUDAAware)"; }
+
+  void SetDeviceOpt(DeviceOpt opt, InternalEnvironment* env)
+  {
+    if (opt == DEV_CUDA_PINNED_HOST) {
+      if (!enable_pinned) {
+        if (allocated) {
+          env->ThrowError("SetDeviceOpt: Allocation mode change must be done before any frame allocation.");
+        }
+        enable_pinned = true;
+      }
+    }
+  }
 };
 #endif
 
@@ -419,6 +416,8 @@ public:
     CUDA_CHECK(cudaStreamWaitEvent(stream, computeEvent, 0));
 #endif
   }
+
+  void SetDeviceOpt(DeviceOpt opt, InternalEnvironment* env) { }
 };
 #endif
 
@@ -473,6 +472,16 @@ Device* DeviceManager::GetDevice(AvsDeviceType device_type, int device_index) co
     env->ThrowError("Not supported memory type %d", device_type);
   }
   return nullptr;
+}
+
+void DeviceManager::SetDeviceOpt(DeviceOpt opt, InternalEnvironment* env)
+{
+    cpuDevice->SetDeviceOpt(opt, env);
+#ifdef ENABLE_CUDA
+    for (auto& dev : cudaDevices) {
+        dev->SetDeviceOpt(opt, env);
+    }
+#endif // #ifdef ENABLE_CUDA
 }
 
 DeviceSetter::DeviceSetter(InternalEnvironment* env, Device* upstreamDevice)
@@ -698,6 +707,7 @@ public:
   virtual PVideoFrame GetFrame(int n, InternalEnvironment* env) = 0;
 };
 
+#ifdef ENABLE_CUDA
 class CUDAFrameTransferEngine : public FrameTransferEngine
 {
     typedef LruCache<size_t, PVideoFrame> CacheType;
@@ -1004,10 +1014,12 @@ public:
     return result;
   }
 };
+#endif
 
 FrameTransferEngine* CreateTransferEngine(QueuePrefetcher& child,
   Device* upstreamDevice, Device* downstreamDevice, int prefetchFrames, InternalEnvironment* env)
 {
+#ifdef ENABLE_CUDA
   if (upstreamDevice->device_type == DEV_TYPE_CPU && downstreamDevice->device_type == DEV_TYPE_CUDA) {
     // CPU to CUDA
     return new CUDAFrameTransferEngine(child, upstreamDevice, downstreamDevice, prefetchFrames, env);
@@ -1020,6 +1032,7 @@ FrameTransferEngine* CreateTransferEngine(QueuePrefetcher& child,
     // CUDA to CUDA
     return new CUDAFrameTransferEngine(child, upstreamDevice, downstreamDevice, prefetchFrames, env);
   }
+#endif
   env->ThrowError("Not supported frame data transfer. up:%s down:%d",
     upstreamDevice->GetName(), downstreamDevice->GetName());
   return nullptr;
@@ -1118,8 +1131,6 @@ public:
         numPrefetch = 0;
       }
 
-      static_cast<CPUDevice*>((void*)env->GetDevice(DEV_TYPE_CPU, 0))->IncrementDevice(upstreamType);
-
       switch (upstreamType) {
       case DEV_TYPE_CPU:
         return new OnDevice(clip, numPrefetch, (Device*)(void*)env->GetDevice(DEV_TYPE_CPU, 0), env);
@@ -1169,6 +1180,7 @@ public:
 
 void CopyCUDAFrame(const PVideoFrame& dst, const PVideoFrame& src, InternalEnvironment* env, bool sync)
 {
+#ifdef ENABLE_CUDA
   size_t srchead = GetFrameHead(src);
   size_t sz = GetFrameTail(src) - srchead;
   const BYTE* srcptr = src->GetFrameBuffer()->GetReadPtr() + srchead;
@@ -1194,6 +1206,9 @@ void CopyCUDAFrame(const PVideoFrame& dst, const PVideoFrame& src, InternalEnvir
   else {
     CUDA_CHECK(cudaMemcpyAsync(dstptr, srcptr, sz, kind));
   }
+#else
+  env->ThrowError("CopyCUDAFrame: CUDA support is disabled ...");
+#endif
 }
 
 PVideoFrame GetFrameOnDevice(PClip& c, int n, const PDevice& device, InternalEnvironment* env)

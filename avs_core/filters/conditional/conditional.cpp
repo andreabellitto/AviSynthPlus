@@ -82,7 +82,7 @@ ConditionalSelect::ConditionalSelect(PClip _child, AVSValue _script,
   GenericVideoFilter(_child), script(_script),
   num_args(_num_args), child_array(_child_array), show(_show) {
     
-  child_devs = -1;
+  child_devs = DEV_TYPE_ANY;
   for (int i=0; i<num_args; i++) {
     const VideoInfo& vin = child_array[i]->GetVideoInfo();
 
@@ -100,6 +100,10 @@ ConditionalSelect::ConditionalSelect(PClip _child, AVSValue _script,
 
     child_devs &= GetDeviceTypes(child_array[i]);
   }
+
+  if (child_devs == 0) {
+    env->ThrowError("ConditionalSelect: No common device among sources!");
+  }
 }
 
 
@@ -115,6 +119,8 @@ int __stdcall ConditionalSelect::SetCacheHints(int cachehints, int frame_range)
     return MT_NICE_FILTER;
   case CACHE_GET_DEV_TYPE:
     return child_devs;
+  case CACHE_GET_CHILD_DEV_TYPE:
+    return DEV_TYPE_ANY;
   }
   return 0;  // We do not pass cache requests upwards.
 }
@@ -267,6 +273,10 @@ ConditionalFilter::ConditionalFilter(PClip _child, PClip _source1, PClip _source
     vi.sample_type = vi1.sample_type;
 
     child_devs = (GetDeviceTypes(source1) & GetDeviceTypes(source2));
+
+    if (child_devs == 0) {
+      env->ThrowError("ConditionalFilter: The two sources must support the same device!");
+    }
   }
 
 const char* const t_TRUE="TRUE"; 

@@ -754,6 +754,7 @@ public:
   virtual ConcurrentVarStringFrame* __stdcall GetTopFrame() { return &top_frame; }
   virtual void __stdcall SetCacheMode(CacheMode mode) { cacheMode = mode; }
   virtual CacheMode __stdcall GetCacheMode() { return cacheMode; }
+  virtual void __stdcall SetDeviceOpt(DeviceOpt opt) { DeviceManager.SetDeviceOpt(opt, this); }
 
   virtual void __stdcall UpdateFunctionExports(const char* funcName, const char* funcParams, const char *exportVar);
 
@@ -970,7 +971,8 @@ ScriptEnvironment::ScriptEnvironment()
 		top_frame.Set("DEV_TYPE_CUDA", (int)DEV_TYPE_CUDA);
 
 		top_frame.Set("CACHE_FAST_START", (int)CACHE_FAST_START);
-		top_frame.Set("CACHE_OPTIMAL_SIZE", (int)CACHE_OPTIMAL_SIZE);
+    top_frame.Set("CACHE_OPTIMAL_SIZE", (int)CACHE_OPTIMAL_SIZE);
+    top_frame.Set("DEV_CUDA_PINNED_HOST", (int)DEV_CUDA_PINNED_HOST);
 
     InitMT();
     thread_pool = new ThreadPool(std::thread::hardware_concurrency(), 1, this);

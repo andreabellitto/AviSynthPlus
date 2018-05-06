@@ -33,12 +33,16 @@ typedef enum _ELogTicketType
     LOGTICKET_W1010 = 1010, // MT-mode specified for script function
 } ELogTicketType;
 
-typedef enum _CacheMode {
+enum CacheMode {
 	CACHE_FAST_START,    // start up time and size balanced mode
 	CACHE_OPTIMAL_SIZE,  // slow start up but optimal speed and cache size
 
 	CACHE_DEFAULT = CACHE_FAST_START,
-} CacheMode;
+};
+
+enum DeviceOpt {
+    DEV_CUDA_PINNED_HOST // allocate CPU frame with CUDA pinned host memory
+};
 
 class OneTimeLogTicket
 {
@@ -178,6 +182,8 @@ public:
   virtual void __stdcall SetCacheMode(CacheMode mode) = 0;
   virtual CacheMode __stdcall GetCacheMode() = 0;
   bool increaseCache;
+
+  virtual void __stdcall SetDeviceOpt(DeviceOpt mode) = 0;
 
   virtual void __stdcall UpdateFunctionExports(const char* funcName, const char* funcParams, const char *exportVar) = 0;
 

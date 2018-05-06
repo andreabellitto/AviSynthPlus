@@ -189,9 +189,9 @@ extern const AVSFunction Script_functions[] = {
   { "IsFloat",  BUILTIN_FUNC_PREFIX, ".", IsFloat },
   { "IsString", BUILTIN_FUNC_PREFIX, ".", IsString },
   { "IsClip",   BUILTIN_FUNC_PREFIX, ".", IsClip },
-  { "IsFunction", BUILTIN_FUNC_PREFIX, ".", IsFunction },
+  { "IsFunction", BUILTIN_FUNC_PREFIX, ".", IsFunction }, // Neo
   { "Defined",  BUILTIN_FUNC_PREFIX, ".", Defined },
-  { "TypeName",  BUILTIN_FUNC_PREFIX, ".", TypeName },
+  { "TypeName",  BUILTIN_FUNC_PREFIX, ".", TypeName }, // Neo
 
   { "Default",  BUILTIN_FUNC_PREFIX, "..", Default },
 
@@ -248,7 +248,8 @@ extern const AVSFunction Script_functions[] = {
   { "Prefetch",         BUILTIN_FUNC_PREFIX, "c[threads]i[frames]i", Prefetcher::Create },
   { "SetLogParams",     BUILTIN_FUNC_PREFIX, "[target]s[level]i", SetLogParams },
   { "LogMsg",              BUILTIN_FUNC_PREFIX, "si", LogMsg },
-  { "SetCacheMode",     BUILTIN_FUNC_PREFIX, "[mode]i", SetCacheMode },
+  { "SetCacheMode",     BUILTIN_FUNC_PREFIX, "[mode]i", SetCacheMode }, // Neo
+  { "SetDeviceOpt",     BUILTIN_FUNC_PREFIX, "[opt]i", SetDeviceOpt }, // Neo
 
   { "IsY",       BUILTIN_FUNC_PREFIX, "c", IsY },
   { "Is420",     BUILTIN_FUNC_PREFIX, "c", Is420 },
@@ -1597,9 +1598,16 @@ AVSValue LogMsg(AVSValue args, void*, IScriptEnvironment* env)
 
 AVSValue SetCacheMode(AVSValue args, void*, IScriptEnvironment* env)
 {
-	InternalEnvironment *env2 = static_cast<InternalEnvironment*>(env);
-	env2->SetCacheMode((CacheMode)args[0].AsInt());
+	InternalEnvironment *envI = static_cast<InternalEnvironment*>(env);
+  envI->SetCacheMode((CacheMode)args[0].AsInt());
 	return AVSValue();
+}
+
+AVSValue SetDeviceOpt(AVSValue args, void*, IScriptEnvironment* env)
+{
+    InternalEnvironment *envI = static_cast<InternalEnvironment*>(env);
+    envI->SetDeviceOpt((DeviceOpt)args[0].AsInt());
+    return AVSValue();
 }
 
 AVSValue SetMemoryMax(AVSValue args, void*, IScriptEnvironment* env)

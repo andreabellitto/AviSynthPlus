@@ -170,8 +170,10 @@ PVideoFrame __stdcall Cache::GetFrame(int n, IScriptEnvironment* env_)
 
         // check device
         if (result->GetFrameBuffer()->device != device) {
-            env->ThrowError("Frame device mismatch: Assumed: %s Actual: %s", 
+            const char* error_msg = env->Sprintf("Frame device mismatch: Assumed: %s Actual: %s",
                 device->GetName(), result->GetFrameBuffer()->device->GetName());
+            result = env->NewVideoFrame(_pimpl->vi);
+            env->ApplyMessage(&result, _pimpl->vi, error_msg, _pimpl->vi.width / 5, 0xa0a0a0, 0, 0);
         }
 
         cache_handle.first->value = result; // not after commit!

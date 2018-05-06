@@ -96,6 +96,7 @@ static std::string GetFullPathNameWrap(const std::string &f)
 static bool IsParameterTypeSpecifier(char c) {
   switch (c) {
   case 'b': case 'i': case 'f': case 's': case 'c': case '.':
+  case 'n':
 #ifdef NEW_AVSVALUE
   case 'a': // Arrays as function parameters
 #endif
