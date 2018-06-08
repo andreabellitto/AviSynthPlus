@@ -549,11 +549,12 @@ class QueuePrefetcher
       }
       catch (...)
       {
+        {
+          std::lock_guard<std::mutex> lock(mutex);
+          workerException = std::current_exception();
+          workerExceptionPresent = true;
+        }
         videoCache->rollback(&work.second);
-
-        std::lock_guard<std::mutex> lock(mutex);
-        workerException = std::current_exception();
-        workerExceptionPresent = true;
       }
     }
 
@@ -674,6 +675,11 @@ public:
       case LRU_LOOKUP_FOUND_BUT_NOTAVAIL:    // Fall-through intentional
       default:
       {
+          std::lock_guard<std::mutex> lock(mutex);
+          if (workerExceptionPresent)
+          {
+            std::rethrow_exception(workerException);
+          }
           env->ThrowError("Invalid Program");
           break;
       }
