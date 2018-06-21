@@ -31,6 +31,8 @@ typedef enum _ELogTicketType
     LOGTICKET_W1008 = 1008, // multiple plugins define the same function
     LOGTICKET_W1009 = 1009, // a filter is using forced alignment
     LOGTICKET_W1010 = 1010, // MT-mode specified for script function
+
+    LOGTICKET_W1100 = 1100, // memory reallocation occurs
 } ELogTicketType;
 
 enum CacheMode {
@@ -41,7 +43,8 @@ enum CacheMode {
 };
 
 enum DeviceOpt {
-    DEV_CUDA_PINNED_HOST // allocate CPU frame with CUDA pinned host memory
+    DEV_CUDA_PINNED_HOST, // allocate CPU frame with CUDA pinned host memory
+    DEV_FREE_THRESHOLD,   // free request count threshold to free frame
 };
 
 class OneTimeLogTicket
@@ -183,7 +186,7 @@ public:
   virtual CacheMode __stdcall GetCacheMode() = 0;
   bool increaseCache;
 
-  virtual void __stdcall SetDeviceOpt(DeviceOpt mode) = 0;
+  virtual void __stdcall SetDeviceOpt(DeviceOpt mode, int val) = 0;
 
   virtual void __stdcall UpdateFunctionExports(const char* funcName, const char* funcParams, const char *exportVar) = 0;
 

@@ -205,7 +205,7 @@ public:
     return nullptr;
   }
 
-  virtual void SetDeviceOpt(DeviceOpt opt, InternalEnvironment* env)
+  virtual void SetDeviceOpt(DeviceOpt opt, int val, InternalEnvironment* env)
   {
     // do nothing
   }
@@ -276,7 +276,7 @@ public:
 
   virtual const char* GetName() const { return "CPU(CUDAAware)"; }
 
-  void SetDeviceOpt(DeviceOpt opt, InternalEnvironment* env)
+  void SetDeviceOpt(DeviceOpt opt, int val, InternalEnvironment* env)
   {
     if (opt == DEV_CUDA_PINNED_HOST) {
       if (!enable_pinned) {
@@ -285,6 +285,9 @@ public:
         }
         enable_pinned = true;
       }
+    }
+    if (opt == DEV_FREE_THRESHOLD) {
+      free_thresh = val;
     }
   }
 };
@@ -417,7 +420,11 @@ public:
 #endif
   }
 
-  void SetDeviceOpt(DeviceOpt opt, InternalEnvironment* env) { }
+  void SetDeviceOpt(DeviceOpt opt, int val, InternalEnvironment* env) {
+    if (opt == DEV_FREE_THRESHOLD) {
+      free_thresh = val;
+    }
+  }
 };
 #endif
 
@@ -474,12 +481,12 @@ Device* DeviceManager::GetDevice(AvsDeviceType device_type, int device_index) co
   return nullptr;
 }
 
-void DeviceManager::SetDeviceOpt(DeviceOpt opt, InternalEnvironment* env)
+void DeviceManager::SetDeviceOpt(DeviceOpt opt, int val, InternalEnvironment* env)
 {
-    cpuDevice->SetDeviceOpt(opt, env);
+    cpuDevice->SetDeviceOpt(opt, val, env);
 #ifdef ENABLE_CUDA
     for (auto& dev : cudaDevices) {
-        dev->SetDeviceOpt(opt, env);
+        dev->SetDeviceOpt(opt, val, env);
     }
 #endif // #ifdef ENABLE_CUDA
 }

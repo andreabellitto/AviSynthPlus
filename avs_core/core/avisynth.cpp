@@ -754,7 +754,7 @@ public:
   virtual ConcurrentVarStringFrame* __stdcall GetTopFrame() { return &top_frame; }
   virtual void __stdcall SetCacheMode(CacheMode mode) { cacheMode = mode; }
   virtual CacheMode __stdcall GetCacheMode() { return cacheMode; }
-  virtual void __stdcall SetDeviceOpt(DeviceOpt opt) { DeviceManager.SetDeviceOpt(opt, this); }
+  virtual void __stdcall SetDeviceOpt(DeviceOpt opt, int val) { DeviceManager.SetDeviceOpt(opt, val, this); }
 
   virtual void __stdcall UpdateFunctionExports(const char* funcName, const char* funcParams, const char *exportVar);
 
@@ -785,7 +785,6 @@ private:
                       bool &pstrict, size_t args_names_count, const char* const* arg_names, IScriptEnvironment* env_thread);
   bool CheckArguments(const Function* f, const AVSValue* args, size_t num_args,
                       bool &pstrict, size_t args_names_count, const char* const* arg_names);
-  void EnsureMemoryLimit(size_t request, Device* device);
   std::unordered_map<IClip*, ClipDataStore> clip_data;
 
   void ExportBuiltinFilters();
@@ -814,6 +813,18 @@ private:
 #endif
     {}
   };
+  class VFBStorage : public VideoFrameBuffer {
+  public:
+    int free_count;
+    VFBStorage() 
+      : VideoFrameBuffer(),
+      free_count(0)
+    { }
+    VFBStorage(int size, Device* device) 
+      : VideoFrameBuffer(size, device),
+      free_count(0)
+    { }
+  };
   typedef std::vector<DebugTimestampedFrame> VideoFrameArrayType;
   typedef std::map<VideoFrameBuffer *, VideoFrameArrayType> FrameBufferRegistryType;
   typedef std::map<size_t, FrameBufferRegistryType> FrameRegistryType2; // post r1825 P.F.
@@ -829,6 +840,8 @@ private:
   CacheRegistryType CacheRegistry;
   Cache* FrontCache;
   VideoFrame* GetNewFrame(size_t vfb_size, Device* device);
+  VideoFrame* GetFrameFromRegistry(size_t vfb_size, Device* device);
+  void ShrinkCache(Device* device);
   VideoFrame* AllocateFrame(size_t vfb_size, Device* device);
   std::recursive_mutex memory_mutex;
 
@@ -973,6 +986,7 @@ ScriptEnvironment::ScriptEnvironment()
 		top_frame.Set("CACHE_FAST_START", (int)CACHE_FAST_START);
     top_frame.Set("CACHE_OPTIMAL_SIZE", (int)CACHE_OPTIMAL_SIZE);
     top_frame.Set("DEV_CUDA_PINNED_HOST", (int)DEV_CUDA_PINNED_HOST);
+    top_frame.Set("DEV_FREE_THRESHOLD", (int)DEV_FREE_THRESHOLD);
 
     InitMT();
     thread_pool = new ThreadPool(std::thread::hardware_concurrency(), 1, this);
@@ -1070,7 +1084,7 @@ ScriptEnvironment::~ScriptEnvironment() {
     it2 != end_it2;
       ++it2)
     {
-      VideoFrameBuffer *vfb = it2->first;
+      VFBStorage *vfb = static_cast<VFBStorage*>(it2->first);
       delete vfb;
       // iterate through frames belonging to this vfb
       for (VideoFrameArrayType::iterator it3 = it2->second.begin(), end_it3 = it2->second.end();
@@ -1581,12 +1595,10 @@ VideoFrame* ScriptEnvironment::AllocateFrame(size_t vfb_size, Device* device)
     throw AvisynthError(this->Sprintf("Requested buffer size of %zu is too large", vfb_size));
   }
 
-  EnsureMemoryLimit(vfb_size, device);
-
-  VideoFrameBuffer* vfb = NULL;
+  VFBStorage* vfb = NULL;
   try
   {
-    vfb = new VideoFrameBuffer((int)vfb_size, device);
+    vfb = new VFBStorage((int)vfb_size, device);
   }
   catch(const std::bad_alloc&)
   {
@@ -1700,26 +1712,8 @@ void ScriptEnvironment::ListFrameRegistry(size_t min_size, size_t max_size, bool
 }
 #endif
 
-
-VideoFrame* ScriptEnvironment::GetNewFrame(size_t vfb_size, Device* device)
+VideoFrame* ScriptEnvironment::GetFrameFromRegistry(size_t vfb_size, Device* device)
 {
-  std::unique_lock<std::recursive_mutex> env_lock(memory_mutex);
-#ifdef DEBUG_GSCRIPTCLIP_MT
-  _RPT1(0, "ScScriptEnvironment::GetNewFrame memory mutex lock: %p\n", (void *)&memory_mutex);
-#endif
-
-  /* -----------------------------------------------------------
-   *   Try to return an unused but already allocated instance
-   * -----------------------------------------------------------
-   */
-   // prevent fragmentation of vfb buffer list many different small-sized vfb's
-  if (vfb_size < 64) vfb_size = 64;
-  else if (vfb_size < 256) vfb_size = 256;
-  else if (vfb_size < 512) vfb_size = 512;
-  else if (vfb_size < 1024) vfb_size = 1024;
-  else if (vfb_size < 2048) vfb_size = 2048;
-  else if (vfb_size < 4096) vfb_size = 4096;
-
 #ifdef _DEBUG
   std::chrono::time_point<std::chrono::high_resolution_clock> t_start, t_end; // std::chrono::time_point<std::chrono::system_clock> t_start, t_end;
   t_start = std::chrono::high_resolution_clock::now();
@@ -1741,14 +1735,14 @@ VideoFrame* ScriptEnvironment::GetNewFrame(size_t vfb_size, Device* device)
   //for (FrameRegistryType2::iterator it = FrameRegistry2.lower_bound(vfb_size), end_it = FrameRegistry2.upper_bound(vfb_size); // exact! no-go. special service clips can fragment it
   //for (FrameRegistryType2::iterator it = FrameRegistry2.lower_bound(vfb_size), end_it = FrameRegistry2.end(); // vfb_size or bigger, so a 100K size would claim a 1.5M space.
   for (FrameRegistryType2::iterator it = FrameRegistry2.lower_bound(vfb_size), end_it = FrameRegistry2.upper_bound(vfb_size * 3 / 2); // vfb_size or at most 1.5* bigger
-      it != end_it;
+    it != end_it;
     ++it)
   {
     for (FrameBufferRegistryType::iterator it2 = it->second.begin(), end_it2 = it->second.end();
       it2 != end_it2;
       ++it2)
     {
-      VideoFrameBuffer *vfb = it2->first; // same for all map content, the key is vfb pointer
+      VFBStorage *vfb = static_cast<VFBStorage*>(it2->first); // same for all map content, the key is vfb pointer
       if (device == vfb->device && 0 == vfb->refcount) // vfb device and refcount check
       {
         size_t videoFrameListSize = it2->second.size();
@@ -1769,6 +1763,7 @@ VideoFrame* ScriptEnvironment::GetNewFrame(size_t vfb_size, Device* device)
           if (!found)
           {
             InterlockedIncrement(&(frame->vfb->refcount)); // same as &(vfb->refcount)
+            vfb->free_count = 0; // reset free count
 #ifdef _DEBUG
             char buf[256];
             t_end = std::chrono::high_resolution_clock::now();
@@ -1781,7 +1776,7 @@ VideoFrame* ScriptEnvironment::GetNewFrame(size_t vfb_size, Device* device)
             _RPT5(0, "                                          frame %p RowSize=%d Height=%d Pitch=%d Offset=%d\n", frame, frame->GetRowSize(), frame->GetHeight(), frame->GetPitch(), frame->GetOffset()); // P.F.
 #endif
 #endif
-            // only 1 frame in list -> no delete
+                                                                                                                                                                                                             // only 1 frame in list -> no delete
             if (videoFrameListSize <= 1)
             {
               _RPT1(0, "ScriptEnvironment::GetNewFrame returning frame. VideoFrameListSize was 1\n", videoFrameListSize); // P.F.
@@ -1824,17 +1819,90 @@ VideoFrame* ScriptEnvironment::GetNewFrame(size_t vfb_size, Device* device)
   //ListFrameRegistry(0, vfb_size, true); // for chasing stuck frames
 #endif
 
+  return NULL;
+}
+
+VideoFrame* ScriptEnvironment::GetNewFrame(size_t vfb_size, Device* device)
+{
+  std::unique_lock<std::recursive_mutex> env_lock(memory_mutex);
+#ifdef DEBUG_GSCRIPTCLIP_MT
+  _RPT1(0, "ScScriptEnvironment::GetNewFrame memory mutex lock: %p\n", (void *)&memory_mutex);
+#endif
+
+   // prevent fragmentation of vfb buffer list many different small-sized vfb's
+  if (vfb_size < 64) vfb_size = 64;
+  else if (vfb_size < 256) vfb_size = 256;
+  else if (vfb_size < 512) vfb_size = 512;
+  else if (vfb_size < 1024) vfb_size = 1024;
+  else if (vfb_size < 2048) vfb_size = 2048;
+  else if (vfb_size < 4096) vfb_size = 4096;
+
+  /* -----------------------------------------------------------
+  *   Try to return an unused but already allocated instance
+  * -----------------------------------------------------------
+  */
+  VideoFrame* frame = GetFrameFromRegistry(vfb_size, device);
+  if (frame != NULL)
+    return frame;
+
   /* -----------------------------------------------------------
    *   No unused instance was found, try to allocate a new one
    * -----------------------------------------------------------
    */
-  VideoFrame* frame = AllocateFrame(vfb_size, device);
+   // We reserve 15% for unaccounted stuff
+  if (device->memory_used + vfb_size < device->memory_max * 0.85f) {
+    frame = AllocateFrame(vfb_size, device);
+  }
   if ( frame != NULL)
     return frame;
 
+#ifdef _DEBUG
+  // #define LIST_CACHES
+  // list all cache_entries
+#ifdef LIST_CACHES
+  int cache_counter = 0;
+  const CacheRegistryType::iterator end_cit_0 = CacheRegistry.end();
+  for (
+    CacheRegistryType::iterator cit = CacheRegistry.begin();
+    (cit != end_cit_0);
+    ++cit
+    )
+  {
+    cache_counter++;
+    Cache* cache = *cit;
+    int cache_size = cache->SetCacheHints(CACHE_GET_SIZE, 0);
+    _RPT4(0, "  cache#%d cache_ptr=%p cache_size=%d \n", cache_counter, (void *)cache, cache_size); // let's see what's in the cache
+  }
+#endif
+#endif
 
   /* -----------------------------------------------------------
-   * Couldn't allocate, try to free up unused frames of any size
+  * Couldn't allocate, shrink cache and get more unused frames
+  * -----------------------------------------------------------
+  */
+  ShrinkCache(device);
+
+  /* -----------------------------------------------------------
+  *   Try to return an unused frame again
+  * -----------------------------------------------------------
+  */
+  frame = GetFrameFromRegistry(vfb_size, device);
+  if (frame != NULL)
+    return frame;
+
+  /* -----------------------------------------------------------
+  *   Try to allocate again
+  * -----------------------------------------------------------
+  */
+  frame = AllocateFrame(vfb_size, device);
+  if (frame != NULL)
+    return frame;
+
+  OneTimeLogTicket ticket(LOGTICKET_W1100);
+  LogMsgOnce(ticket, LOGLEVEL_WARNING, "Memory reallocation occurs. This will probably degrade performance. You can try increasing the limit using SetMemoryMax().");
+
+  /* -----------------------------------------------------------
+   * No frame found, free all the unused frames!!!
    * -----------------------------------------------------------
    */
   _RPT1(0, "Allocate failed. GC start memory_used=%I64d\n", device->memory_used.load());
@@ -1849,7 +1917,7 @@ VideoFrame* ScriptEnvironment::GetNewFrame(size_t vfb_size, Device* device)
       it2 != end_it2;
       /*++it2: not here: may delete iterator position */)
     {
-      VideoFrameBuffer *vfb = it2->first;
+      VFBStorage *vfb = static_cast<VFBStorage*>(it2->first);
       if (device == vfb->device && 0 == vfb->refcount) // vfb refcount check
       {
         vfb->device->memory_used -= vfb->GetDataSize(); // frame->vfb->GetDataSize();
@@ -1872,7 +1940,11 @@ VideoFrame* ScriptEnvironment::GetNewFrame(size_t vfb_size, Device* device)
     }
   }
   _RPT1(0, "End of garbage collection A memused=%I64d\n", device->memory_used.load()); // P.F.
-
+#if 0
+  static int counter = 0;
+  char buf[200]; sprintf(buf, "Re allocation %d\r\n", counter++);
+  OutputDebugStringA(buf);
+#endif
   /* -----------------------------------------------------------
    *   Try to allocate again
    * -----------------------------------------------------------
@@ -1908,44 +1980,18 @@ VideoFrame* ScriptEnvironment::GetNewFrame(size_t vfb_size, Device* device)
   return NULL;
 }
 
-void ScriptEnvironment::EnsureMemoryLimit(size_t request, Device* device)
+void ScriptEnvironment::ShrinkCache(Device* device)
 {
-
   /* -----------------------------------------------------------
-   *             Ensure SetMemoryMax limit is kept
-   * -----------------------------------------------------------
-   */
-
-   // We reserve 15% for unaccounted stuff
-  size_t memory_need = size_t((device->memory_used + request) / 0.85f);
-
-  _RPT4(0, "ScriptEnvironment::EnsureMemoryLimit CR_size=%zu memory_need=%zu memory_used=%I64d memory_max=%I64d\n", CacheRegistry.size(), memory_need, device->memory_used.load(), device->memory_max);
-#ifdef _DEBUG
-  // #define LIST_CACHES
-  // list all cache_entries
-#ifdef LIST_CACHES
-  int cache_counter = 0;
-  const CacheRegistryType::iterator end_cit_0 = CacheRegistry.end();
-  for (
-    CacheRegistryType::iterator cit = CacheRegistry.begin();
-    (cit != end_cit_0);
-    ++cit
-    )
-  {
-    cache_counter++;
-    Cache* cache = *cit;
-    int cache_size = cache->SetCacheHints(CACHE_GET_SIZE, 0);
-    _RPT4(0, "  cache#%d cache_ptr=%p cache_size=%d \n", cache_counter, (void *)cache, cache_size); // let's see what's in the cache
-  }
-#endif
-#endif
-
+  *   Shrink cache to keep memory limit
+  * -----------------------------------------------------------
+  */
   int shrinkcount = 0;
 
   const CacheRegistryType::iterator end_cit = CacheRegistry.end();
   for (
     CacheRegistryType::iterator cit = CacheRegistry.begin();
-    (memory_need > device->memory_max) && (cit != end_cit);
+    cit != end_cit;
     ++cit
     )
   {
@@ -1956,7 +2002,7 @@ void ScriptEnvironment::EnsureMemoryLimit(size_t request, Device* device)
 
     Cache* cache = *cit;
     if (cache->GetDevice() != device) {
-        continue;
+      continue;
     }
     int cache_size = cache->SetCacheHints(CACHE_GET_SIZE, 0);
     if (cache_size != 0)
@@ -1969,12 +2015,12 @@ void ScriptEnvironment::EnsureMemoryLimit(size_t request, Device* device)
 
   if (shrinkcount != 0)
   {
-      OneTimeLogTicket ticket(LOGTICKET_W1003);
-      LogMsgOnce(ticket, LOGLEVEL_WARNING, "Caches have been shrunk due to low memory limit. This will probably degrade performance. You can try increasing the limit using SetMemoryMax().");
+    OneTimeLogTicket ticket(LOGTICKET_W1003);
+    LogMsgOnce(ticket, LOGLEVEL_WARNING, "Caches have been shrunk due to low memory limit. This will probably degrade performance. You can try increasing the limit using SetMemoryMax().");
   }
 
   /* -----------------------------------------------------------
-  * Try to free up memory that we've just released from a cache
+  * Count up free_count and free if it exceeds the threshold
   * -----------------------------------------------------------
   */
   // Free up in one pass in FrameRegistry2
@@ -1993,12 +2039,18 @@ void ScriptEnvironment::EnsureMemoryLimit(size_t request, Device* device)
         it2 != end_it2;
         /*++it2: not here: may delete iterator position */)
       {
-        VideoFrameBuffer *vfb = it2->first;
-        if (device == vfb->device && 0 == vfb->refcount) // vfb device and refcount check
+        VFBStorage *vfb = static_cast<VFBStorage*>(it2->first);
+        // vfb device and refcount check and free count exceeds the threshold
+        if (device == vfb->device && 0 == vfb->refcount && vfb->free_count++ >= device->free_thresh)
         {
+#if 0
+          static int counter = 0;
+          char buf[200]; sprintf(buf, "Free frame !!! %d\r\n", counter++);
+          OutputDebugStringA(buf);
+#endif
           _RPT2(0, "ScriptEnvironment::EnsureMemoryLimit v2 req=%Iu freed=%d\n", request, vfb->GetDataSize()); // P.F.
           device->memory_used -= vfb->GetDataSize();
-          VideoFrameBuffer *_vfb = vfb;
+          VFBStorage *_vfb = vfb;
           delete vfb;
           ++freed_vfb_count;
           const VideoFrameArrayType::iterator end_it3 = it2->second.end();

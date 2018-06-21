@@ -624,9 +624,9 @@ public:
 		return core->GetCacheMode();
 	}
 
-  virtual void __stdcall SetDeviceOpt(DeviceOpt opt)
+  virtual void __stdcall SetDeviceOpt(DeviceOpt opt, int val)
   {
-    core->SetDeviceOpt(opt);
+    core->SetDeviceOpt(opt, val);
   }
 
   virtual void __stdcall UpdateFunctionExports(const char*, const char*, const char *)

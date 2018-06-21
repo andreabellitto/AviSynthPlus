@@ -25,13 +25,16 @@ public:
     unsigned __int64 memory_max;
     std::atomic<unsigned __int64> memory_used;
 
+    int  free_thresh;
+
     Device(AvsDeviceType type, int id, int index, InternalEnvironment* env) :
 		  env(env),
       device_type(type),
       device_id(id),
       device_index(index),
 		  memory_max(0),
-		  memory_used(0)
+		  memory_used(0),
+      free_thresh(0)
     { }
 
     virtual ~Device() { }
@@ -44,7 +47,7 @@ public:
     virtual std::unique_ptr<std::vector<DeviceCompleteCallbackData>> GetAndClearCallbacks() = 0;
     virtual void SetActiveToCurrentThread(InternalEnvironment* env) = 0;
     virtual void* GetComputeStream() = 0;
-    virtual void SetDeviceOpt(DeviceOpt opt, InternalEnvironment* env) = 0;
+    virtual void SetDeviceOpt(DeviceOpt opt, int val, InternalEnvironment* env) = 0;
 };
 
 class DeviceManager {
@@ -64,7 +67,7 @@ public:
 
     int GetNumDevices() const { return numDevices; }
 
-    void SetDeviceOpt(DeviceOpt opt, InternalEnvironment* env);
+    void SetDeviceOpt(DeviceOpt opt, int val, InternalEnvironment* env);
 };
 
 class DeviceSetter {

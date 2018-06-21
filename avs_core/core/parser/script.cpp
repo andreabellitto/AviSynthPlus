@@ -249,7 +249,7 @@ extern const AVSFunction Script_functions[] = {
   { "SetLogParams",     BUILTIN_FUNC_PREFIX, "[target]s[level]i", SetLogParams },
   { "LogMsg",              BUILTIN_FUNC_PREFIX, "si", LogMsg },
   { "SetCacheMode",     BUILTIN_FUNC_PREFIX, "[mode]i", SetCacheMode }, // Neo
-  { "SetDeviceOpt",     BUILTIN_FUNC_PREFIX, "[opt]i", SetDeviceOpt }, // Neo
+  { "SetDeviceOpt",     BUILTIN_FUNC_PREFIX, "[opt]i[val]i", SetDeviceOpt }, // Neo
 
   { "IsY",       BUILTIN_FUNC_PREFIX, "c", IsY },
   { "Is420",     BUILTIN_FUNC_PREFIX, "c", Is420 },
@@ -1606,7 +1606,7 @@ AVSValue SetCacheMode(AVSValue args, void*, IScriptEnvironment* env)
 AVSValue SetDeviceOpt(AVSValue args, void*, IScriptEnvironment* env)
 {
     InternalEnvironment *envI = static_cast<InternalEnvironment*>(env);
-    envI->SetDeviceOpt((DeviceOpt)args[0].AsInt());
+    envI->SetDeviceOpt((DeviceOpt)args[0].AsInt(), args[1].AsInt(0));
     return AVSValue();
 }
 
