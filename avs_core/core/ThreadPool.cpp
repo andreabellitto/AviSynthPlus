@@ -53,7 +53,7 @@ void ThreadPool::ThreadFunc(size_t thread_id, ThreadPoolPimpl * const _pimpl, In
 		}
 
 		EnvTLS->Specialize(data.Environment.get(), data.Device);
-		EnvTLS->increaseCache = true;
+		EnvTLS->supressCaching = false;
 		if (data.Promise != NULL)
 		{
 			try

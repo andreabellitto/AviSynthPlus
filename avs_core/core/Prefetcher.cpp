@@ -130,7 +130,7 @@ Prefetcher::Prefetcher(const PClip& _child, int _nThreads, int _nPrefetchFrames,
   _pimpl(NULL)
 {
   _pimpl = new PrefetcherPimpl(_child, _nThreads, _nPrefetchFrames, static_cast<IScriptEnvironment2*>(env));
-  _pimpl->VideoCache = std::make_shared<LruCache<size_t, PVideoFrame> >(_pimpl->nPrefetchFrames*2, CACHE_DEFAULT);
+  _pimpl->VideoCache = std::make_shared<LruCache<size_t, PVideoFrame> >(_pimpl->nPrefetchFrames*2, CACHE_NO_RESIZE);
 }
 
 void Prefetcher::Destroy()
@@ -164,8 +164,7 @@ int __stdcall Prefetcher::SchedulePrefetch(int current_n, int prefetch_start, In
 
     PVideoFrame result;
     LruCache<size_t, PVideoFrame>::handle cache_handle;
-		bool increaseCache = true;
-    switch(_pimpl->VideoCache->lookup(n, &cache_handle, false, result, increaseCache))
+    switch(_pimpl->VideoCache->lookup(n, &cache_handle, false, result))
     {
     case LRU_LOOKUP_NOT_FOUND:
       {
@@ -280,9 +279,8 @@ PVideoFrame __stdcall Prefetcher::GetFrame(int n, IScriptEnvironment* env)
   // Get requested frame
   PVideoFrame result;
   LruCache<size_t, PVideoFrame>::handle cache_handle;
-	bool increaseCache = true;
   // fill result if LRU_LOOKUP_FOUND_AND_READY
-  switch(_pimpl->VideoCache->lookup(n, &cache_handle, true, result, increaseCache))
+  switch(_pimpl->VideoCache->lookup(n, &cache_handle, true, result))
   {
   case LRU_LOOKUP_NOT_FOUND:
     {

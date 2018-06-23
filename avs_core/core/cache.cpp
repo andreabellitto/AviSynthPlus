@@ -65,14 +65,14 @@ struct GetFrameCounter {
 class CacheStack
 {
 	InternalEnvironment* env;
-	bool retIncreaseCache;
+	bool retSupressCaching;
 public:
 	CacheStack(InternalEnvironment* env)
 		: env(env)
-		, retIncreaseCache(env->increaseCache)
+		, retSupressCaching(env->supressCaching)
 	{ }
 	~CacheStack() {
-		env->increaseCache = retIncreaseCache;
+		env->supressCaching = retSupressCaching;
 	}
 };
 
@@ -153,12 +153,12 @@ PVideoFrame __stdcall Cache::GetFrame(int n, IScriptEnvironment* env_)
   IScriptEnvironment2 *env2 = static_cast<IScriptEnvironment2*>(env);
   _snprintf(buf, 255, "Cache::GetFrame lookup follows: [%s] n=%6d Thread=%zu", name.c_str(), n, env2->GetProperty(AEP_THREAD_ID));
 
-  LruLookupResult LruLookupRes = _pimpl->VideoCache->lookup(n, &cache_handle, true, result, env->increaseCache);
+  LruLookupResult LruLookupRes = _pimpl->VideoCache->lookup(n, &cache_handle, true, result, &env->supressCaching);
   _snprintf(buf, 255, "Cache::GetFrame lookup ready: [%s] n=%6d Thread=%zu res=%d", name.c_str(), n, env2->GetProperty(AEP_THREAD_ID), (int)LruLookupRes);
   switch (LruLookupRes)
 #else
   // fill result in lookup before releasing cache handle lock
-  switch(_pimpl->VideoCache->lookup(n, &cache_handle, true, result, env->increaseCache))
+  switch(_pimpl->VideoCache->lookup(n, &cache_handle, true, result, &env->supressCaching))
 #endif
   {
   case LRU_LOOKUP_NOT_FOUND:

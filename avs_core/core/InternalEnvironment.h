@@ -38,6 +38,7 @@ typedef enum _ELogTicketType
 enum CacheMode {
 	CACHE_FAST_START,    // start up time and size balanced mode
 	CACHE_OPTIMAL_SIZE,  // slow start up but optimal speed and cache size
+	CACHE_NO_RESIZE,     // internal use only
 
 	CACHE_DEFAULT = CACHE_FAST_START,
 };
@@ -67,10 +68,13 @@ class ConcurrentVarStringFrame;
 extern __declspec(thread) size_t g_thread_id;
 extern __declspec(thread) int g_getframe_recursive_count;
 
-// concurrent GetFrame with Invoke cause deadlock
-// increment this variable when Invoke running
+// Concurrent GetFrame with Invoke causes deadlock.
+// Increment this variable when Invoke running
 // to prevent submitting job to threadpool
 extern __declspec(thread) int g_suppress_thread_count;
+
+class FilterGraphNode;
+extern __declspec(thread) FilterGraphNode* g_current_graph_node;
 
 // Strictly for Avisynth core only.
 // Neither host applications nor plugins should use
@@ -184,7 +188,7 @@ public:
   // Nekopanda: new cache control mechanism
   virtual void __stdcall SetCacheMode(CacheMode mode) = 0;
   virtual CacheMode __stdcall GetCacheMode() = 0;
-  bool increaseCache;
+  bool supressCaching;
 
   virtual void __stdcall SetDeviceOpt(DeviceOpt mode, int val) = 0;
 

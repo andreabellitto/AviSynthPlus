@@ -1,5 +1,8 @@
 #include "FilterGraph.h"
+#include "DeviceManager.h"
 #include "InternalEnvironment.h"
+
+#include <avs/win.h>
 
 #include <map>
 #include <iostream>
@@ -23,6 +26,7 @@ FilterGraphNode::FilterGraphNode(PClip child, const char* name,
   const AVSValue& last_, const AVSValue& args_, const char* const* argnames_)
   : child(child)
   , name(name)
+  , memory(new GraphMemoryNode())
 {
   if (last_.Defined()) {
     std::vector<AVSValue> argstmp;
@@ -46,6 +50,47 @@ FilterGraphNode::FilterGraphNode(PClip child, const char* name,
   }
 }
 
+__declspec(thread) FilterGraphNode* g_current_graph_node;
+
+struct ScopedGraphNode {
+  FilterGraphNode* prev;
+  ScopedGraphNode(FilterGraphNode* node) {
+    prev = g_current_graph_node;
+    g_current_graph_node = node;
+  }
+  ~ScopedGraphNode() {
+    g_current_graph_node = prev;
+  }
+};
+
+PVideoFrame __stdcall FilterGraphNode::GetFrame(int n, IScriptEnvironment* env)
+{
+  ScopedGraphNode scope(this);
+  return child->GetFrame(n, env);
+}
+
+void GraphMemoryNode::OnAllocate(size_t bytes, Device* dev)
+{
+  auto it = memory.find(dev);
+  if (it == memory.end()) {
+    memory[dev] = MemoryInfo();
+    it = memory.find(dev);
+  }
+  it->second.numAllocation++;
+  it->second.totalBytes += bytes;
+}
+
+void GraphMemoryNode::OnFree(size_t bytes, Device* dev)
+{
+  auto it = memory.find(dev);
+  if (it == memory.end()) {
+    printf("Unexpected behavior ...\n");
+    return;
+  }
+  it->second.numAllocation--;
+  it->second.totalBytes -= bytes;
+}
+
 class FilterGraph
 {
 protected:
@@ -58,8 +103,9 @@ protected:
     std::string args;
     std::vector<void*> refNodes;
 
-		int cacheSize;
-		int cacheCapacity;
+    int cacheSize;
+    int cacheCapacity;
+    std::map<Device*, GraphMemoryNode::MemoryInfo> memory;
 
     NodeInfo() { }
     NodeInfo(int number) : number(number) { }
@@ -76,8 +122,9 @@ protected:
         info.isFunction = false;
         info.name = node->name;
         info.args = "(" + DoArray(info, nullptr, node->argnames.data(), node->args) + ")";
-				info.cacheSize = node->SetCacheHints(CACHE_GET_SIZE, 0);
-				info.cacheCapacity = node->SetCacheHints(CACHE_GET_CAPACITY, 0);
+        info.cacheSize = node->SetCacheHints(CACHE_GET_SIZE, 0);
+        info.cacheCapacity = node->SetCacheHints(CACHE_GET_CAPACITY, 0);
+        info.memory = node->memory->memory;
       }
       OutClip(nodeMap[node]);
     }
@@ -222,9 +269,20 @@ public:
 class DotFilterGraph : private FilterGraph
 {
   bool enableArgs;
+  bool enableMemory;
   std::stringstream ss;
 
 protected:
+
+  void printfcomma(size_t n) {
+    if (n < 1000) {
+      ss << n;
+      return;
+    }
+    printfcomma(n / 1000);
+    ss << ',' << std::setfill('0') << std::setw(3) << (n % 1000);
+  }
+
   virtual void OutClip(const NodeInfo& info) {
     int num = info.number + 1;
     ss << "clip" << num;
@@ -240,12 +298,20 @@ protected:
         ss << " [label = \"" << label << "\"];" << std::endl;
       }
       else {
-				if (info.cacheCapacity != 0) {
-					ss << " [label = \"" << info.name << "(" << info.cacheSize << " of " << info.cacheCapacity << ")" << "\"];" << std::endl;
-				}
-				else {
-					ss << " [label = \"" << info.name << "\"];" << std::endl;
-				}
+        if (info.cacheCapacity != 0) {
+          ss << " [label = \"" << info.name << "(caching " << info.cacheSize << " frames with capacity " << info.cacheCapacity << ")";
+        }
+        else {
+          ss << " [label = \"" << info.name;
+        }
+        if (enableMemory) {
+          for (auto entry : info.memory) {
+            ss << "\\n" << entry.first->GetName() << ": " << entry.second.numAllocation << " frames, ";
+            printfcomma(entry.second.totalBytes);
+            ss << " bytes";
+          }
+        }
+        ss << "\"];" << std::endl;;
       }
     }
     for (void* pclip : info.refNodes) {
@@ -293,8 +359,9 @@ protected:
   }
 public:
 
-  void Construct(FilterGraphNode* root, bool enableArgs, IScriptEnvironment* env) {
+  void Construct(FilterGraphNode* root, bool enableArgs, bool enableMemory, IScriptEnvironment* env) {
     this->enableArgs = enableArgs;
+    this->enableMemory = enableMemory;
     ss << "digraph avs_filter_graph {" << std::endl;
     ss << "node [ shape = box ];" << std::endl;
     int last = FilterGraph::Construct(root, env);
@@ -310,56 +377,101 @@ public:
 
 static void DoDumpGraph(PClip clip, int mode, const char* path, IScriptEnvironment* env)
 {
-	FilterGraphNode* root = dynamic_cast<FilterGraphNode*>((IClip*)(void*)clip);
+  FilterGraphNode* root = dynamic_cast<FilterGraphNode*>((IClip*)(void*)clip);
 
-	std::string ret;
+  std::string ret;
 
-	if (mode == 0) {
-		AvsScriptFilterGraph graph;
-		graph.Construct(root, env);
-		ret = graph.GetOutput();
-	}
-	else if (mode == 1 || mode == 2) {
-		DotFilterGraph graph;
-		graph.Construct(root, mode == 1, env);
-		ret = graph.GetOutput();
-	}
-	else {
-		env->ThrowError("Unknown mode (%d)", mode);
-	}
+  if (mode == 0) {
+    AvsScriptFilterGraph graph;
+    graph.Construct(root, env);
+    ret = graph.GetOutput();
+  }
+  else if (mode == 1 || mode == 2) {
+    DotFilterGraph graph;
+    graph.Construct(root, mode == 1, true, env);
+    ret = graph.GetOutput();
+  }
+  else {
+    env->ThrowError("Unknown mode (%d)", mode);
+  }
 
-	FILE* fp = fopen(path, "w");
-	if (fp == nullptr) {
-		env->ThrowError("Could not open output file ...");
-	}
-	fwrite(ret.data(), ret.size(), 1, fp);
-	fclose(fp);
+  FILE* fp = fopen(path, "w");
+  if (fp == nullptr) {
+    env->ThrowError("Could not open output file ...");
+  }
+  fwrite(ret.data(), ret.size(), 1, fp);
+  fclose(fp);
 }
 
 class DelayedDump : public GenericVideoFilter
 {
-	std::string outpath;
-	int mode;
-	int nframes;
-	bool fired;
+  std::string outpath;
+  int mode;
+  int nframes;
+  bool repeat;
+  std::vector<bool> fired;
 public:
-	DelayedDump(PClip clip, const std::string& outpath, int mode, int nframes)
-		: GenericVideoFilter(clip)
-		, outpath(outpath)
-		, mode(mode)
-		, nframes(nframes)
-		, fired(false)
-	{ }
+  DelayedDump(PClip clip, const std::string& outpath, int mode, int nframes, bool repeat)
+    : GenericVideoFilter(clip)
+    , outpath(outpath)
+    , mode(mode)
+    , nframes(nframes)
+    , repeat(repeat)
+  {
+    if (repeat) {
+      fired.resize((clip->GetVideoInfo().num_frames + nframes - 1) / nframes);
+    }
+    else {
+      fired.resize(1);
+    }
+  }
 
-	PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env)
-	{
-		if (n == nframes && fired == false) {
-			fired = true;
-			DoDumpGraph(child, mode, outpath.c_str(), env);
-		}
-		return child->GetFrame(n, env);
-	}
+  PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env)
+  {
+    if (repeat) {
+      int slot = std::max(0, std::min(n / nframes, (int)fired.size() - 1));
+      if (fired[slot] == false) {
+        fired[slot] = true;
+        char basename[260];
+        strcpy(basename, outpath.c_str());
+        char* extension = strrchr(basename, '.');
+        if (extension) {
+          *extension++ = 0;
+        }
+        std::string path(basename);
+        path = path + "-" + std::to_string(n);
+        if (extension) {
+          path = path + "." + extension;
+        }
+        DoDumpGraph(child, mode, path.c_str(), env);
+      }
+    }
+    else {
+      if (n == nframes && fired[0] == false) {
+        fired[0] = true;
+        DoDumpGraph(child, mode, outpath.c_str(), env);
+      }
+    }
+    return child->GetFrame(n, env);
+  }
 };
+
+static std::string GetFullPathNameWrap(const std::string &f)
+{
+  // Get the lenght of the buffer we need
+  DWORD len = GetFullPathName(f.c_str(), 0, NULL, NULL);
+
+  // Reserve space and make call
+  char *fullPathName = new char[len];
+  GetFullPathName(f.c_str(), len, fullPathName, NULL);
+
+  // Wrap into C++ string
+  std::string result(fullPathName);
+
+  // Cleanup and return
+  delete[] fullPathName;
+  return result;
+}
 
 static AVSValue DumpFilterGraph(AVSValue args, void* user_data, IScriptEnvironment* env) {
   PClip clip = args[0].AsClip();
@@ -368,15 +480,16 @@ static AVSValue DumpFilterGraph(AVSValue args, void* user_data, IScriptEnvironme
     env->ThrowError("clip is not a FilterChainNode. Ensure you have enabled the chain analysis by SetChainAnalysis(true).");
   }
 
-	int mode = args[2].AsInt(0);
-	const char* path = args[1].AsString("");
-	int nframes = args[3].AsInt(-1);
+  int mode = args[2].AsInt(0);
+  const char* path = args[1].AsString("");
+  int nframes = args[3].AsInt(-1);
+  bool repeat = args[4].AsBool(false);
 
-	if (nframes >= 0) {
-		return new DelayedDump(clip, path, mode, nframes);
-	}
+  if (nframes >= 0) {
+    return new DelayedDump(clip, GetFullPathNameWrap(path), mode, nframes, repeat);
+  }
 
-	DoDumpGraph(clip, mode, path, env);
+  DoDumpGraph(clip, mode, path, env);
 
   return clip;
 }
@@ -388,6 +501,6 @@ static AVSValue __cdecl SetGraphAnalysis(AVSValue args, void* user_data, IScript
 
 extern const AVSFunction FilterGraph_filters[] = {
   { "SetGraphAnalysis", BUILTIN_FUNC_PREFIX, "b", SetGraphAnalysis, nullptr },
-  { "DumpFilterGraph", BUILTIN_FUNC_PREFIX, "c[outfile]s[mode]i[nframes]i", DumpFilterGraph, nullptr },
+  { "DumpFilterGraph", BUILTIN_FUNC_PREFIX, "c[outfile]s[mode]i[nframes]i[repeat]b", DumpFilterGraph, nullptr },
   { 0 }
 };

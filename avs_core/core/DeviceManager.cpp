@@ -24,7 +24,7 @@
   do { \
     cudaError_t err__ = call; \
     if (err__ != cudaSuccess) { \
-      env->ThrowError("[CUDA Error] %d: %s", err__, cudaGetErrorString(err__)); \
+      env->ThrowError("[CUDA Error] %d: %s @%d", err__, cudaGetErrorString(err__), __LINE__); \
     } \
   } while (0)
 
@@ -234,7 +234,7 @@ public:
     //  ? cudaHostAllocMapped : cudaHostAllocDefault;
     // Without portable flag, allocated memory is associated with one cuda context,
     // i.e. one GPU. portable flag is required to use this memory with all GPUs.
-    unsigned int flags = (num_cuda_devices > 1) 
+    unsigned int flags = (num_cuda_devices > 1)
       ? cudaHostAllocPortable : cudaHostAllocDefault;
     BYTE* data = nullptr;
 #ifdef _DEBUG
@@ -446,8 +446,8 @@ DeviceManager::DeviceManager(InternalEnvironment* env) :
   // if cuda capable device is available, we always allocate with page locked memory.
   // is it OK ???
   cpuDevice = std::unique_ptr<Device>((cuda_device_count > 0)
-      ? new CUDACPUDevice(env, cuda_device_count)
-      : new CPUDevice(env));
+    ? new CUDACPUDevice(env, cuda_device_count)
+    : new CPUDevice(env));
 #else // ENABLE_CUDA
   cpuDevice = std::unique_ptr<CPUDevice>(new CPUDevice(env));
 #endif // ENABLE_CUDA
@@ -483,11 +483,11 @@ Device* DeviceManager::GetDevice(AvsDeviceType device_type, int device_index) co
 
 void DeviceManager::SetDeviceOpt(DeviceOpt opt, int val, InternalEnvironment* env)
 {
-    cpuDevice->SetDeviceOpt(opt, val, env);
+  cpuDevice->SetDeviceOpt(opt, val, env);
 #ifdef ENABLE_CUDA
-    for (auto& dev : cudaDevices) {
-        dev->SetDeviceOpt(opt, val, env);
-    }
+  for (auto& dev : cudaDevices) {
+    dev->SetDeviceOpt(opt, val, env);
+  }
 #endif // #ifdef ENABLE_CUDA
 }
 
@@ -531,7 +531,7 @@ class QueuePrefetcher
     return static_cast<QueuePrefetcher*>(data)->ThreadWorker(
       static_cast<InternalEnvironment*>(env));
   }
-    
+
   AVSValue ThreadWorker(InternalEnvironment* env)
   {
     device->SetActiveToCurrentThread(env);
@@ -568,61 +568,61 @@ class QueuePrefetcher
     return AVSValue();
   }
 
-  int SchedulePrefetch(int currentN, int prefetchStart, InternalEnvironment* env)
+  void SchedulePrefetch(int currentN, InternalEnvironment* env)
   {
     int numQueued = 0;
-    int n = prefetchStart;
-    for (; n < currentN + prefetchFrames && n < vi.num_frames; ++n)
+    for (int n = currentN + 1;
+      (n < currentN + prefetchFrames) && (n < vi.num_frames);
+      ++n)
     {
       PVideoFrame result;
       CacheType::handle cacheHandle;
-			bool increaseCache = true;
-      switch (videoCache->lookup(n, &cacheHandle, false, result, increaseCache))
+      switch (videoCache->lookup(n, &cacheHandle, false, result))
       {
-        case LRU_LOOKUP_NOT_FOUND:
-        {
-            std::lock_guard<std::mutex> lock(mutex);
-            prefetchQueue.emplace_back(n, cacheHandle);
-            ++numQueued;
-            break;
-        }
-        case LRU_LOOKUP_FOUND_AND_READY:      // Fall-through intentional
-        case LRU_LOOKUP_NO_CACHE:             // Fall-through intentional
-        case LRU_LOOKUP_FOUND_BUT_NOTAVAIL:
-        {
-            break;
-        }
-        default:
-        {
-            env->ThrowError("Invalid Program");
-            break;
-        }
+      case LRU_LOOKUP_NOT_FOUND:
+      {
+        std::lock_guard<std::mutex> lock(mutex);
+        prefetchQueue.emplace_back(n, cacheHandle);
+        ++numQueued;
+        break;
+      }
+      case LRU_LOOKUP_FOUND_AND_READY:      // Fall-through intentional
+      case LRU_LOOKUP_NO_CACHE:             // Fall-through intentional
+      case LRU_LOOKUP_FOUND_BUT_NOTAVAIL:
+      {
+        break;
+      }
+      default:
+      {
+        env->ThrowError("Invalid Program");
+        break;
+      }
       }
     }
+    // wake up sleeping thread
     if (numQueued > 0) {
-        std::lock_guard<std::mutex> lock(mutex);
-        for (; numWorkers < numThreads && numQueued > 0; ++numWorkers, --numQueued) {
-            threadPool->QueueJob(ThreadWorker_, this, env, nullptr);
-        }
+      std::lock_guard<std::mutex> lock(mutex);
+      for (; numWorkers < numThreads && numQueued > 0; ++numWorkers, --numQueued) {
+        threadPool->QueueJob(ThreadWorker_, this, env, nullptr);
+      }
     }
-    return n;
   }
 
 public:
   QueuePrefetcher(PClip child, int prefetchFrames, int numThreads, Device* device, InternalEnvironment* env) :
-      child(child),
-      vi(child->GetVideoInfo()),
-      prefetchFrames(prefetchFrames),
-      numThreads(numThreads),
-      threadPool(NULL),
-      device(device),
-      videoCache(NULL),
-      numWorkers(0),
-      workerExceptionPresent(false)
+    child(child),
+    vi(child->GetVideoInfo()),
+    prefetchFrames(prefetchFrames),
+    numThreads(numThreads),
+    threadPool(NULL),
+    device(device),
+    videoCache(NULL),
+    numWorkers(0),
+    workerExceptionPresent(false)
   {
     if (numThreads > 0 && prefetchFrames > 0) {
       threadPool = env->NewThreadPool(numThreads);
-      videoCache = std::shared_ptr<CacheType>(new CacheType(prefetchFrames * 2, CACHE_DEFAULT));
+      videoCache = std::shared_ptr<CacheType>(new CacheType(prefetchFrames - 1, CACHE_NO_RESIZE));
     }
     else {
       numThreads = prefetchFrames = 0;
@@ -651,49 +651,44 @@ public:
       return child->GetFrame(n, env);
     }
 
-    {
-      std::lock_guard<std::mutex> lock(mutex);
-      if (workerExceptionPresent)
-      {
-          std::rethrow_exception(workerException);
-      }
-    }
-
-    // Prefetch 1
-    int prefetchPos = SchedulePrefetch(n, n, env);
-
-    // Get requested frame
     PVideoFrame result;
     CacheType::handle cacheHandle;
-		bool increaseCache = true;
-    // fill result if LRU_LOOKUP_FOUND_AND_READY
-    switch (videoCache->lookup(n, &cacheHandle, true, result, increaseCache))
+    switch (videoCache->lookup(n, &cacheHandle, true, result)) {
+    case LRU_LOOKUP_FOUND_AND_READY:
+      break;
+    case LRU_LOOKUP_NOT_FOUND:
     {
-      case LRU_LOOKUP_FOUND_AND_READY:
+      try
       {
-          break;
-      }
-      case LRU_LOOKUP_NO_CACHE:
-      {
-          result = child->GetFrame(n, env);
-          break;
-      }
-      case LRU_LOOKUP_NOT_FOUND:             // Fall-through intentional
-      case LRU_LOOKUP_FOUND_BUT_NOTAVAIL:    // Fall-through intentional
-      default:
-      {
+        {
           std::lock_guard<std::mutex> lock(mutex);
+          // check error
           if (workerExceptionPresent)
           {
             std::rethrow_exception(workerException);
           }
-          env->ThrowError("Invalid Program");
-          break;
+        }
+        cacheHandle.first->value = child->GetFrame(n, env);
+        result = cacheHandle.first->value;
+        videoCache->commit_value(&cacheHandle);
       }
+      catch (...)
+      {
+        videoCache->rollback(&cacheHandle);
+        throw;
+      }
+      break;
+    }
+    case LRU_LOOKUP_NO_CACHE:
+      result = child->GetFrame(n, env);
+      break;
+    case LRU_LOOKUP_FOUND_BUT_NOTAVAIL:   // Fall-through intentional
+    default:
+      env->ThrowError("Invalid Program");
+      break;
     }
 
-    // Prefetch 2
-    SchedulePrefetch(n, prefetchPos, env);
+    SchedulePrefetch(n, env);
 
     return result;
   }
@@ -702,15 +697,15 @@ public:
 class FrameTransferEngine
 {
 public:
-    QueuePrefetcher& child;
-    VideoInfo vi;
+  QueuePrefetcher& child;
+  VideoInfo vi;
 
   Device* upstreamDevice;
   Device* downstreamDevice;
 
   FrameTransferEngine(QueuePrefetcher& child, Device* upstreamDevice, Device* downstreamDevice) :
-        child(child),
-        vi(child.GetVideoInfo()),
+    child(child),
+    vi(child.GetVideoInfo()),
     upstreamDevice(upstreamDevice),
     downstreamDevice(downstreamDevice)
   { }
@@ -723,19 +718,19 @@ public:
 #ifdef ENABLE_CUDA
 class CUDAFrameTransferEngine : public FrameTransferEngine
 {
-    typedef LruCache<size_t, PVideoFrame> CacheType;
+  typedef LruCache<size_t, PVideoFrame> CacheType;
 
-    struct QueueItem {
-        size_t n;
-        PVideoFrame src;
-        CacheType::handle cacheHandle;
-        cudaEvent_t completeEvent;
-        std::unique_ptr<std::vector<DeviceCompleteCallbackData>> completeCallbacks;
-    };
+  struct QueueItem {
+    size_t n;
+    PVideoFrame src;
+    CacheType::handle cacheHandle;
+    cudaEvent_t completeEvent;
+    std::unique_ptr<std::vector<DeviceCompleteCallbackData>> completeCallbacks;
+  };
 
   int prefetchFrames;
 
-    std::shared_ptr<CacheType> videoCache;
+  std::shared_ptr<CacheType> videoCache;
 
   std::mutex mutex;
   cudaStream_t stream;
@@ -842,31 +837,30 @@ class CUDAFrameTransferEngine : public FrameTransferEngine
     {
       PVideoFrame result;
       CacheType::handle cacheHandle;
-			bool increaseCache = true;
-      switch (videoCache->lookup(n, &cacheHandle, false, result, increaseCache))
+      switch (videoCache->lookup(n, &cacheHandle, false, result))
       {
-        case LRU_LOOKUP_NOT_FOUND:
-        {
-          try {
-            prefetchQueue.emplace_back(SetupTransfer(n, cacheHandle, env));
-          }
-          catch(...) {
-            videoCache->rollback(&cacheHandle);
-            throw;
-          }
-          break;
+      case LRU_LOOKUP_NOT_FOUND:
+      {
+        try {
+          prefetchQueue.emplace_back(SetupTransfer(n, cacheHandle, env));
         }
-        case LRU_LOOKUP_FOUND_AND_READY:      // Fall-through intentional
-        case LRU_LOOKUP_NO_CACHE:             // Fall-through intentional
-        case LRU_LOOKUP_FOUND_BUT_NOTAVAIL:
-        {
-            break;
+        catch (...) {
+          videoCache->rollback(&cacheHandle);
+          throw;
         }
-        default:
-        {
-          env->ThrowError("Invalid Program");
-            break;
-        }
+        break;
+      }
+      case LRU_LOOKUP_FOUND_AND_READY:      // Fall-through intentional
+      case LRU_LOOKUP_NO_CACHE:             // Fall-through intentional
+      case LRU_LOOKUP_FOUND_BUT_NOTAVAIL:
+      {
+        break;
+      }
+      default:
+      {
+        env->ThrowError("Invalid Program");
+        break;
+      }
       }
     }
     return n;
@@ -948,7 +942,7 @@ public:
   CUDAFrameTransferEngine(QueuePrefetcher& child, Device* upstreamDevice, Device* downstreamDevice, int prefetchFrames, InternalEnvironment* env) :
     FrameTransferEngine(child, upstreamDevice, downstreamDevice),
     prefetchFrames(prefetchFrames),
-    videoCache(new CacheType(prefetchFrames*2, CACHE_DEFAULT)),
+    videoCache(new CacheType(std::max(0, prefetchFrames - 1), CACHE_NO_RESIZE)),
     stream(nullptr)
   {
     CheckDevicePair(env);
@@ -986,40 +980,40 @@ public:
 
     FinishCompleted(env);
 
-    // Prefetch 1
-    int prefetchPos = SchedulePrefetch(n, n, env);
+    SchedulePrefetch(n, n, env);
 
     // Get requested frame
     PVideoFrame result;
     CacheType::handle cacheHandle;
-		bool increaseCache = true;
     // fill result if LRU_LOOKUP_FOUND_AND_READY
-    switch (videoCache->lookup(n, &cacheHandle, false, result, increaseCache))
+    switch (videoCache->lookup(n, &cacheHandle, false, result))
     {
-      case LRU_LOOKUP_FOUND_AND_READY:
-      {
-          break;
-      }
-      case LRU_LOOKUP_NO_CACHE:
-      {
-          result = GetFrameImmediate(n, env);
-          break;
-      }
-      case LRU_LOOKUP_FOUND_BUT_NOTAVAIL:
-      {
-        // now transferring, wait until completion
-        result = WaitUntil(n, env);
-        break;
-      }
-      default:
-      {
-        env->ThrowError("Invalid Program");
-          break;
-      }
+    case LRU_LOOKUP_FOUND_AND_READY:
+    {
+      break;
     }
-
-    // Prefetch 2
-    SchedulePrefetch(n, prefetchPos, env);
+    case LRU_LOOKUP_NO_CACHE:
+    {
+      result = GetFrameImmediate(n, env);
+      break;
+    }
+    case LRU_LOOKUP_FOUND_BUT_NOTAVAIL:
+    {
+      // now transferring, wait until completion
+      result = WaitUntil(n, env);
+      break;
+    }
+    case LRU_LOOKUP_NOT_FOUND:
+    {
+      env->ThrowError("Oh.. maybe cache size is too small ...");
+      break;
+    }
+    default:
+    {
+      env->ThrowError("Invalid Program");
+      break;
+    }
+    }
 
     // set downstreamdevice
     downstreamDevice->SetActiveToCurrentThread(env);
@@ -1068,7 +1062,8 @@ class OnDevice : public GenericVideoFilter
     if (it != transferEngines.end()) {
       return it->second.get();
     }
-    auto pEngine = CreateTransferEngine(prefetcher, upstreamDevice, downstreamDevice, prefetchFrames, env);
+    int transferPrefetch = (prefetchFrames == 1) ? 2 : prefetchFrames;
+    auto pEngine = CreateTransferEngine(prefetcher, upstreamDevice, downstreamDevice, transferPrefetch, env);
     transferEngines[downstreamDevice] = std::unique_ptr<FrameTransferEngine>(pEngine);
     return pEngine;
   }
@@ -1089,7 +1084,7 @@ public:
     if (downstreamDevice == nullptr) {
       env->ThrowError("This thread is not created by AviSynth. It is not allowed to call GetFrame on this thread ...");
     }
-    
+
     if (downstreamDevice == upstreamDevice) {
       // shortcut
       return child->GetFrame(n, env);
@@ -1137,7 +1132,7 @@ public:
 
     if (args[0].IsClip()) {
       PClip clip = args[0].AsClip();
-      int numPrefetch = args[1].Defined() ? args[1].AsInt() : 4;
+      int numPrefetch = args[1].Defined() ? args[1].AsInt() : 1;
       int upstreamIndex = (args.ArraySize() >= 3 && args[2].Defined()) ? args[2].AsInt() : 0;
 
       if (numPrefetch < 0) {
