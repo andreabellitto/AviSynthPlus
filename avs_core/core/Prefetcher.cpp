@@ -7,7 +7,6 @@
 #include "ThreadPool.h"
 #include "ObjectPool.h"
 #include "LruCache.h"
-#include "ScriptEnvironmentTLS.h"
 #include "InternalEnvironment.h"
 
 struct PrefetcherJobParams

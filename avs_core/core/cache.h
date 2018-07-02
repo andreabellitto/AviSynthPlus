@@ -87,6 +87,7 @@ private:
 
     PClip child;
     VideoInfo vi;
+		IScriptEnvironment* globalEnv;
 
     std::vector<std::pair<Device*, PClip>> deviceCaches;
 	CacheHints hints;

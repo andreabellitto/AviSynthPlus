@@ -547,7 +547,7 @@ AVSValue ExpFunctionCall::Evaluate(IScriptEnvironment* env)
   try
   { // Invoke can always throw by calling a constructor of a filter that throws
     if (env2->Invoke_(&result, implicit_last,
-      real_name, real_func, AVSValue(args.data(), arg_expr_count), arg_expr_names, nullptr))
+      real_name, real_func, AVSValue(args.data(), arg_expr_count), arg_expr_names))
       return result;
   } catch(const IScriptEnvironment::NotFound&){}
 
