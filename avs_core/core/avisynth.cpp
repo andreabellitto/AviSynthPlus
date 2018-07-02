@@ -867,6 +867,14 @@ struct ScriptEnvironmentTLS
   bool closing;                 // Used to avoid deadlock, if vartable is being accessed while shutting down (Popcontext)
   bool supressCaching;
   int ImportDepth;
+	int getFrameRecursiveCount;
+
+	// Concurrent GetFrame with Invoke causes deadlock.
+	// Increment this variable when Invoke running
+	// to prevent submitting job to threadpool
+	int suppressThreadCount;
+	
+	FilterGraphNode* currentGraphNode;
   volatile long refcount;
 
   ScriptEnvironmentTLS(int thread_id, InternalEnvironment* core)
@@ -877,6 +885,9 @@ struct ScriptEnvironmentTLS
     , closing(false)
     , supressCaching(false)
     , ImportDepth(0)
+		, getFrameRecursiveCount(0)
+		, suppressThreadCount(0)
+		, currentGraphNode(nullptr)
     , refcount(1)
   {
   }
@@ -1167,7 +1178,7 @@ public:
     bool is_runtime = true;
 
     if (g_TLS == nullptr) { // not called by thread
-      if (g_getframe_recursive_count == 0) { // not called by GetFrame
+      if (GetFrameRecursiveCount() == 0) { // not called by GetFrame
         is_runtime = false;
       }
     }
@@ -1513,6 +1524,11 @@ public:
     return core->GetCacheMode();
   }
 
+	bool& __stdcall GetSupressCaching()
+	{
+		return DISPATCH(supressCaching);
+	}
+
   void __stdcall SetDeviceOpt(DeviceOpt opt, int val)
   {
     core->SetDeviceOpt(opt, val);
@@ -1520,22 +1536,33 @@ public:
 
   void __stdcall UpdateFunctionExports(const char* funcName, const char* funcParams, const char *exportVar)
   {
-    if (g_thread_id != 0 || g_getframe_recursive_count != 0) {
+    if (GetThreadId() != 0 || GetFrameRecursiveCount() != 0) {
       // no need to export function at runtime
       return;
     }
     core->UpdateFunctionExports(funcName, funcParams, exportVar);
   }
 
-  virtual InternalEnvironment* __stdcall NewThreadScriptEnvironment(int thread_id)
+  InternalEnvironment* __stdcall NewThreadScriptEnvironment(int thread_id)
   {
     return new ThreadScriptEnvironment(thread_id, core, coreTLS);
   }
 
-  virtual bool& __stdcall GetSupressCaching()
-  {
-    return DISPATCH(supressCaching);
-  }
+	int __stdcall GetThreadId() {
+		return DISPATCH(thread_id);
+	}
+
+	int& __stdcall GetFrameRecursiveCount() {
+		return DISPATCH(getFrameRecursiveCount);
+	}
+
+	int& __stdcall GetSuppressThreadCount() {
+		return DISPATCH(suppressThreadCount);
+	}
+
+	FilterGraphNode*& GetCurrentGraphNode() {
+		return DISPATCH(currentGraphNode);
+	}
 
 #undef DISPATCH
 };
@@ -2179,7 +2206,7 @@ VideoFrame* ScriptEnvironment::AllocateFrame(size_t vfb_size, Device* device)
   }
 
   device->memory_used += vfb_size;
-  vfb->Attach(g_current_graph_node);
+  vfb->Attach(threadEnv->GetCurrentGraphNode());
 
   // automatically inserts keys if they not exist!
   // no locking here, calling method have done it already
@@ -2327,7 +2354,7 @@ VideoFrame* ScriptEnvironment::GetFrameFromRegistry(size_t vfb_size, Device* dev
           {
             InterlockedIncrement(&(frame->vfb->refcount)); // same as &(vfb->refcount)
             vfb->free_count = 0; // reset free count
-            vfb->Attach(g_current_graph_node);
+            vfb->Attach(threadEnv->GetCurrentGraphNode());
 #ifdef _DEBUG
             char buf[256];
             t_end = std::chrono::high_resolution_clock::now();
@@ -3236,11 +3263,6 @@ bool ScriptEnvironment::CheckArguments(const Function* func, const AVSValue* arg
   return false;
 }
 
-struct SuppressThreadCounter {
-  SuppressThreadCounter() { ++g_suppress_thread_count; }
-  ~SuppressThreadCounter() { --g_suppress_thread_count; }
-};
-
 bool ScriptEnvironment::Invoke_(AVSValue *result, const AVSValue& implicit_last,
   const char* name, const Function *f, const AVSValue& args, const char* const* arg_names,
   InternalEnvironment* env_thread, bool is_runtime)
@@ -3391,7 +3413,7 @@ bool ScriptEnvironment::Invoke_(AVSValue *result, const AVSValue& implicit_last,
   std::lock_guard<std::recursive_mutex> env_lock(memory_mutex);
 #endif
 
-  SuppressThreadCounter suppressThreadCount_;
+  ScopedCounter suppressThreadCount_(threadEnv->GetSuppressThreadCount());
 
   // chainedCtor is true if we are being constructed inside/by the
   // constructor of another filter. In that case we want MT protections

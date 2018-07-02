@@ -50,22 +50,21 @@ FilterGraphNode::FilterGraphNode(PClip child, const char* name,
   }
 }
 
-__declspec(thread) FilterGraphNode* g_current_graph_node;
-
 struct ScopedGraphNode {
+	FilterGraphNode*& target;
   FilterGraphNode* prev;
-  ScopedGraphNode(FilterGraphNode* node) {
-    prev = g_current_graph_node;
-    g_current_graph_node = node;
+  ScopedGraphNode(FilterGraphNode*& target, FilterGraphNode* node) : target(target) {
+    prev = target;
+		target = node;
   }
   ~ScopedGraphNode() {
-    g_current_graph_node = prev;
+		target = prev;
   }
 };
 
 PVideoFrame __stdcall FilterGraphNode::GetFrame(int n, IScriptEnvironment* env)
 {
-  ScopedGraphNode scope(this);
+  ScopedGraphNode scope(static_cast<InternalEnvironment*>(env)->GetCurrentGraphNode(), this);
   return child->GetFrame(n, env);
 }
 
