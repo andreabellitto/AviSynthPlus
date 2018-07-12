@@ -117,8 +117,10 @@ public:
     const int atrack = args[5].AsInt(0);
 
     PClip result = new AVISource(args[0][0].AsString(), fAudio, pixel_type, fourCC, vtrack, atrack, mode, env);
-    for (int i=1; i<args[0].ArraySize(); ++i)
-      result = new_Splice(result, new AVISource(args[0][i].AsString(), fAudio, pixel_type, fourCC, vtrack, atrack, mode, env), false, env);
+    for (int i = 1; i < args[0].ArraySize(); ++i) {
+      AVSValue arg[3] = { result, new AVISource(args[0][i].AsString(), fAudio, pixel_type, fourCC, vtrack, atrack, mode, env), 0 };
+      result = env->Invoke("UnalignedSplice", AVSValue(arg, 3)).AsClip();
+    }
     return AlignPlanar::Create(result);
   }
 };
