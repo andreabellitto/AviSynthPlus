@@ -54,7 +54,10 @@ enum MANAGE_CACHE_KEYS
   MC_NodCache          = (int)0xFFFF0007,
   MC_NodAndExpandCache = (int)0xFFFF0008,
   MC_RegisterMTGuard,
-  MC_UnRegisterMTGuard
+  MC_UnRegisterMTGuard,
+
+	MC_RegisterGraphNode = (int)0xFFFF0100,
+	MC_UnRegisterGraphNode,
 };
 
 #include <avisynth.h>

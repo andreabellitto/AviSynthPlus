@@ -47,6 +47,7 @@ private:
 
 class FilterGraphNode : public IClip
 {
+	IScriptEnvironment* Env;
   PClip child;
 
   std::string name;
@@ -58,7 +59,9 @@ class FilterGraphNode : public IClip
 
   friend FilterGraph;
 public:
-  FilterGraphNode(PClip child, const char* name, const AVSValue& last, const AVSValue& args, const char* const* arg_names);
+  FilterGraphNode(PClip child, const char* name, const AVSValue& last, 
+		const AVSValue& args, const char* const* arg_names, IScriptEnvironment* env);
+	~FilterGraphNode();
 
   virtual int __stdcall GetVersion() { return child->GetVersion(); }
   virtual PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env);
@@ -75,5 +78,7 @@ public:
 
   PGraphMemoryNode GetMemoryNode() { return memory; }
 };
+
+void DoDumpGraph(const std::vector<FilterGraphNode*>& roots, const char* path, IScriptEnvironment* env);
 
 #endif  // _AVS_FILTER_GRAPH_H

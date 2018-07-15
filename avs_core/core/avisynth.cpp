@@ -845,12 +845,133 @@ private:
   // filter graph
   bool graphAnalysisEnable;
 
+	typedef std::vector<FilterGraphNode*> GraphNodeRegistryType;
+	GraphNodeRegistryType GraphNodeRegistry;
+
   CacheMode cacheMode;
 
   void InitMT();
 };
 const std::string ScriptEnvironment::DEFAULT_MODE_SPECIFIER = "DEFAULT_MT_MODE";
 
+// Only ThrowError and Sprintf is implemented(Used by destructor)
+class MinimumScriptEnvironment : public IScriptEnvironment {
+	VarTable var_table;
+public:
+	MinimumScriptEnvironment(ConcurrentVarStringFrame* top_frame) : var_table(top_frame) { }
+	virtual ~MinimumScriptEnvironment() {}
+	virtual int __stdcall GetCPUFlags() {
+		throw AvisynthError("Not Implemented");
+	}
+	virtual char* __stdcall SaveString(const char* s, int length = -1) {
+		return var_table.SaveString(s, length);
+	}
+	virtual char* __stdcall Sprintf(const char* fmt, ...) {
+		va_list val;
+		va_start(val, fmt);
+		char* result = VSprintf(fmt, val);
+		va_end(val);
+		return result;
+	}
+	virtual char* __stdcall VSprintf(const char* fmt, void* val) {
+		try {
+			std::string str = FormatString(fmt, (va_list)val);
+			return var_table.SaveString(str.c_str(), int(str.size())); // SaveString will add the NULL in len mode.
+		}
+		catch (...) {
+			return NULL;
+		}
+	}
+	__declspec(noreturn) virtual void __stdcall ThrowError(const char* fmt, ...) {
+		va_list val;
+		va_start(val, fmt);
+		VThrowError(fmt, val);
+		va_end(val);
+	}
+	void __stdcall VThrowError(const char* fmt, va_list va)
+	{
+		std::string msg;
+		try {
+			msg = FormatString(fmt, va);
+		}
+		catch (...) {
+			msg = "Exception while processing ScriptEnvironment::ThrowError().";
+		}
+		// Throw...
+		throw AvisynthError(var_table.SaveString(msg.c_str()));
+	}
+	virtual void __stdcall AddFunction(const char* name, const char* params, ApplyFunc apply, void* user_data) {
+		throw AvisynthError("Not Implemented");
+	}
+	virtual bool __stdcall FunctionExists(const char* name) {
+		throw AvisynthError("Not Implemented");
+	}
+	virtual AVSValue __stdcall Invoke(const char* name, const AVSValue args, const char* const* arg_names = 0) {
+		throw AvisynthError("Not Implemented");
+	}
+	virtual AVSValue __stdcall GetVar(const char* name) {
+		throw AvisynthError("Not Implemented");
+	}
+	virtual bool __stdcall SetVar(const char* name, const AVSValue& val) {
+		throw AvisynthError("Not Implemented");
+	}
+	virtual bool __stdcall SetGlobalVar(const char* name, const AVSValue& val) {
+		throw AvisynthError("Not Implemented");
+	}
+	virtual void __stdcall PushContext(int level = 0) {
+		throw AvisynthError("Not Implemented");
+	}
+	virtual void __stdcall PopContext() {
+		throw AvisynthError("Not Implemented");
+	}
+	virtual PVideoFrame __stdcall NewVideoFrame(const VideoInfo& vi, int align = FRAME_ALIGN) {
+		throw AvisynthError("Not Implemented");
+	}
+	virtual bool __stdcall MakeWritable(PVideoFrame* pvf) {
+		throw AvisynthError("Not Implemented");
+	}
+	virtual void __stdcall BitBlt(BYTE* dstp, int dst_pitch, const BYTE* srcp, int src_pitch, int row_size, int height) {
+		throw AvisynthError("Not Implemented");
+	}
+	virtual void __stdcall AtExit(ShutdownFunc function, void* user_data) {
+		throw AvisynthError("Not Implemented");
+	}
+	virtual void __stdcall CheckVersion(int version = AVISYNTH_INTERFACE_VERSION) {
+		throw AvisynthError("Not Implemented");
+	}
+	virtual PVideoFrame __stdcall Subframe(PVideoFrame src, int rel_offset, int new_pitch, int new_row_size, int new_height) {
+		throw AvisynthError("Not Implemented");
+	}
+	virtual int __stdcall SetMemoryMax(int mem) {
+		throw AvisynthError("Not Implemented");
+	}
+	virtual int __stdcall SetWorkingDir(const char * newdir) {
+		throw AvisynthError("Not Implemented");
+	}
+	virtual void* __stdcall ManageCache(int key, void* data) {
+		throw AvisynthError("Not Implemented");
+	}
+	virtual bool __stdcall PlanarChromaAlignment(PlanarChromaAlignmentMode key) {
+		throw AvisynthError("Not Implemented");
+	}
+	virtual PVideoFrame __stdcall SubframePlanar(PVideoFrame src, int rel_offset, int new_pitch, int new_row_size,
+		int new_height, int rel_offsetU, int rel_offsetV, int new_pitchUV) {
+		throw AvisynthError("Not Implemented");
+	}
+	virtual void __stdcall DeleteScriptEnvironment() {
+		throw AvisynthError("Not Implemented");
+	}
+	virtual void __stdcall ApplyMessage(PVideoFrame* frame, const VideoInfo& vi, const char* message, int size,
+		int textcolor, int halocolor, int bgcolor) {
+		throw AvisynthError("Not Implemented");
+	}
+	virtual const AVS_Linkage* __stdcall GetAVSLinkage() {
+		throw AvisynthError("Not Implemented");
+	}
+	virtual AVSValue __stdcall GetVarDef(const char* name, const AVSValue& def = AVSValue()) {
+		throw AvisynthError("Not Implemented");
+	}
+};
 
 /* ---------------------------------------------------------------------------------
 *  Per thread data
@@ -1744,6 +1865,18 @@ ScriptEnvironment::~ScriptEnvironment() {
   if (EnvCount > 0) {
     LogMsg(LOGLEVEL_WARNING, "ThreadScriptEnvironment leaks.");
   }
+
+#if 0
+	// check clip leaks DoDumpGraph
+	if (std::find_if(GraphNodeRegistry.begin(), GraphNodeRegistry.end(),
+		[](FilterGraphNode* node) { return node != nullptr; }) != GraphNodeRegistry.end())
+	{
+		// This is dangerous operation because thread's string is destroyed
+		// and may be there are dangling string pointer which results in access violation.
+		MinimumScriptEnvironment env(&top_frame);
+		DoDumpGraph(GraphNodeRegistry, "clip_leaks.txt", &env);
+	}
+#endif
 
   // delete avsmap
   for (FrameRegistryType2::iterator it = FrameRegistry2.begin(), end_it = FrameRegistry2.end();
@@ -3135,6 +3268,25 @@ void* ScriptEnvironment::ManageCache(int key, void* data) {
     }
     break;
   }
+	case MC_RegisterGraphNode:
+	{
+		FilterGraphNode* node = reinterpret_cast<FilterGraphNode*>(data);
+		GraphNodeRegistry.push_back(node);
+		break;
+	}
+	case MC_UnRegisterGraphNode:
+	{
+		FilterGraphNode* node = reinterpret_cast<FilterGraphNode*>(data);
+		for (auto& item : GraphNodeRegistry)
+		{
+			if (item == node)
+			{
+				item = NULL;
+				break;
+			}
+		}
+		break;
+	}
   } // switch
 #ifdef DEBUG_GSCRIPTCLIP_MT
   _RPT2(0, "ScriptEnvironment::ManageCache memory mutex will unlock on release: %p thread=%d\n", (void *)&memory_mutex, GetCurrentThreadId());
@@ -3655,7 +3807,7 @@ bool ScriptEnvironment::Invoke_(AVSValue *result, const AVSValue& implicit_last,
     // filter graph
     if (graphAnalysisEnable && (*result).IsClip()) {
       auto last = (argbase == 0) ? implicit_last : AVSValue();
-      *result = new FilterGraphNode((*result).AsClip(), f->name, last, args, arg_names);
+      *result = new FilterGraphNode((*result).AsClip(), f->name, last, args, arg_names, threadEnv.get());
     }
 
     // args2 and args3 are not valid after this point anymore

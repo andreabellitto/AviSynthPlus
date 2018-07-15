@@ -248,7 +248,7 @@ public:
 
    void Clear()
    {
-      string_dump.Clear();
+      //string_dump.Clear(); // do not destroy string (it is destroyed at destructor)
       VarFrame::Clear();
    }
 };
