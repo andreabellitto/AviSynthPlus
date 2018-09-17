@@ -18,12 +18,17 @@ endif()
 
 IF( MSVC_IDE )  # Check for Visual Studio
 
-  IF( MSVC_VERSION VERSION_LESS 1700 )  # Check for v11 (VS 2012)
-    MESSAGE(FATAL_ERROR "Visual C++ 2012 or newer required.")
+  #1800      = VS 12.0 (v120 toolset)
+  #1900      = VS 14.0 (v140 toolset)
+  #1910-1919 = VS 15.0 (v141 toolset)
+
+  IF( MSVC_VERSION VERSION_LESS 1910 )
+    MESSAGE(FATAL_ERROR "Visual C++ 2017 or newer required.")
   ENDIF()
 
   file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/Output/plugins")
   file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/Output/system")
+  file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/Output/c_api")
 
   IF(CMAKE_GENERATOR_TOOLSET STREQUAL "v141_clang_c2")
      #1900 is reported
@@ -32,9 +37,8 @@ IF( MSVC_IDE )  # Check for Visual Studio
   ENDIF()
   
   # We want our project to also run on Windows XP
-  IF( MSVC_VERSION VERSION_LESS 1900 )  # Check for v11 (VS 2012)
-    set(CMAKE_GENERATOR_TOOLSET "v120_xp" CACHE STRING "The compiler toolset to use for Visual Studio." FORCE)
-  ELSEIF(MSVC_VERSION VERSION_LESS 1910 )
+  # 1900 (VS2015) is not supported but we leave here
+  IF(MSVC_VERSION VERSION_LESS 1910 )
     IF(NOT CLANG_IN_VS STREQUAL "1")
       set(CMAKE_GENERATOR_TOOLSET "v140_xp" CACHE STRING "The compiler toolset to use for Visual Studio." FORCE) # VS2015
       # https://connect.microsoft.com/VisualStudio/feedback/details/1789709/visual-c-2015-runtime-broken-on-windows-server-2003-c-11-magic-statics
@@ -76,9 +80,14 @@ IF( MSVC_IDE )  # Check for Visual Studio
   # Set additional optimization flags
   set(CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE} /Oy /Ot /GS- /Oi")
   set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /Oy /Ot /GS- /Oi")
+
+  # Set C++17 flag
+  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} /std:c++17")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /std:c++17")
 ELSE()
 
-  SET( CMAKE_CXX_FLAGS  "${CMAKE_CXX_FLAGS} -std=gnu++14" )
+  # c++17: if constexpr() and others from gcc 7
+  SET( CMAKE_CXX_FLAGS  "${CMAKE_CXX_FLAGS} -std=gnu++17" ) # or -std=c++17 w/o gnu c++17 extensions
   SET( CMAKE_CXX_FLAGS  "${CMAKE_CXX_FLAGS} -march=native" )
 
 ENDIF()

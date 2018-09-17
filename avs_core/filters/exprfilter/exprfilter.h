@@ -39,7 +39,7 @@ Container& split(
 {
   result.clear();
   size_t current;
-  size_t next = -1;
+  size_t next = (size_t)-1;
   do {
     if (empties == split1::no_empties) {
       next = s.find_first_not_of(delimiters, next + 1);
@@ -67,6 +67,7 @@ typedef enum {
   opAnd, opOr, opXor, opNeg,
   opExp, opLog, opPow,
   opSin, opCos, opTan, opAsin, opAcos, opAtan,
+  opClip,
   opStoreVar, opLoadVar, opStoreAndPopVar
 } SOperation;
 
@@ -152,9 +153,16 @@ private:
   const bool optSingleMode; // generate asm code using only one XMM/YMM register set instead of two
   const bool optSSE2; // disable simd path
 
+  // scale_inputs related settings
+  const std::string scale_inputs;
+  bool autoconv_full_scale;
+  bool autoconv_conv_int;
+  bool autoconv_conv_float;
+  const bool clamp_float;
+
 public:
   Exprfilter(const std::vector<PClip>& _child_array, const std::vector<std::string>& _expr_array, const char *_newformat, const bool _optAvx2, 
-    const bool _optSingleMode2, const bool _optSSE2, IScriptEnvironment *env);
+    const bool _optSingleMode2, const bool _optSSE2, const std::string _scale_inputs, const bool _clamp_float, IScriptEnvironment *env);
   PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment *env);
   ~Exprfilter();
   static AVSValue __cdecl Create(AVSValue args, void*, IScriptEnvironment* env);
@@ -172,6 +180,7 @@ public:
   }
 
   int __stdcall SetCacheHints(int cachehints, int frame_range) {
+    AVS_UNUSED(frame_range);
     return cachehints == CACHE_GET_MTMODE ? MT_NICE_FILTER : 0;
   }
 

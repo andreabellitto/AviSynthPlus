@@ -2651,9 +2651,9 @@ VideoFrame* ScriptEnvironment::GetNewFrame(size_t vfb_size, Device* device)
           it3 != end_it3;
           ++it3)
         {
-          VideoFrame *frame = it3->frame;
-          assert(0 == frame->refcount);
-          delete frame;
+          VideoFrame *currentframe = it3->frame;
+          assert(0 == currentframe->refcount);
+          delete currentframe;
           delete it3->avsmap;
         }
         // delete array belonging to this vfb in one step

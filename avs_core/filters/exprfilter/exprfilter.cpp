@@ -51,14 +51,15 @@
 *           expr auto variable: 'frameno' holds the current frame number 0..total number of frames-1
 *           expr auto variable: 'time' relative time in clip, 0 <= time < 1 
 *                calculation: time = frameno/total number of frames)
+* 20180614 new parameters: scale_inputs, clamp_float
+*          implement 'clip' three operand operator like in masktools2: x minvalue maxvalue clip -> max(min(x, maxvalue), minvalue)
 *
-* Differences from masktools 2.2.9
-* --------------------------------
+* Differences from masktools 2.2.15
+* ---------------------------------
 *   Up to 26 clips are allowed (x,y,z,a,b,...w). Masktools handles only up to 4 clips with its mt_lut, my_lutxy, mt_lutxyz, mt_lutxyza
 *   Clips with different bit depths are allowed
 *   works with 32 bit floats instead of 64 bit double internally 
 *   less functions (e.g. no bit shifts)
-*   no float clamping and float-to-8bit-and-back load/store autoscale magic
 *   logical 'false' is 0 instead of -1
 *   avs+: ymin, ymax, etc built-in constants can have a _X suffix, where X is the corresponding clip designator letter. E.g. cmax_z, range_half_x
 *   mt_lutspa-like functionality is available through "sx", "sy", "sxr", "syr"
@@ -98,22 +99,6 @@
 //#define TEST_AVX2_CODEGEN_IN_AVX
 
 #include <immintrin.h>
-
-
-// 8 bit uv to float
-static float uv8tof(int color) {
-#ifdef FLOAT_CHROMA_IS_ZERO_CENTERED
-  const float shift = 0.0f;
-#else
-  const float shift = 0.5f;
-#endif
-  return (color - 128) / 255.0f + shift;
-}
-
-// 8 bit fullscale to float
-static float c8tof(int color) {
-  return color / 255.0f;
-}
 
 #ifdef VS_TARGET_CPU_X86
 
@@ -613,9 +598,9 @@ struct ExprEval : public jitasm::function<void, ExprEval, uint8_t *, const intpt
   ExprEval(std::vector<ExprOp> &ops, int numInputs, int cpuFlags, int planewidth, int planeheight, bool singleMode) : ops(ops), numInputs(numInputs), cpuFlags(cpuFlags), 
     planewidth(planewidth), planeheight(planeheight), singleMode(singleMode), labelCount(0) {}
 
-  __forceinline void doMask(XmmReg &r, Reg &constptr, int planewidth)
+  __forceinline void doMask(XmmReg &r, Reg &constptr, int _planewidth)
   {
-    switch (planewidth & 3) {
+    switch (_planewidth & 3) {
     case 1: andps(r, CPTR(loadmask1000)); break;
     case 2: andps(r, CPTR(loadmask1100)); break;
     case 3: andps(r, CPTR(loadmask1110)); break;
@@ -2243,6 +2228,30 @@ struct ExprEval : public jitasm::function<void, ExprEval, uint8_t *, const intpt
           EXP_PS(t2.second)
         }
       }
+      else if (iter.op == opClip) {
+        // clip(a, low, high) = min(max(a, low),high)
+        if (processSingle) {
+          auto t1 = stack1.back();
+          stack1.pop_back();
+          auto t2 = stack1.back();
+          stack1.pop_back();
+          auto &t3 = stack1.back();
+          maxps(t3, t2);
+          minps(t3, t1);
+        }
+        else {
+          auto t1 = stack.back();
+          stack.pop_back();
+          auto t2 = stack.back();
+          stack.pop_back();
+          auto &t3 = stack.back();
+          maxps(t3.first, t2.first);
+          minps(t3.first, t1.first);
+          maxps(t3.second, t2.second);
+          minps(t3.second, t1.second);
+        }
+      }
+
     }
   }
 
@@ -2266,7 +2275,7 @@ struct ExprEval : public jitasm::function<void, ExprEval, uint8_t *, const intpt
           processingLoop<false, false>(regptrs, zero, constptr, SpatialY);
 
         const int EXTRA = 2; // output pointer, xcounter
-        if (sizeof(void *) == 8) {
+        if constexpr(sizeof(void *) == 8) {
             int numIter = (numInputs + EXTRA + 1) / 2;
             for (int i = 0; i < numIter; i++) {
                 XmmReg r1, r2;
@@ -3002,6 +3011,29 @@ struct ExprEvalAvx2 : public jitasm::function<void, ExprEvalAvx2, uint8_t *, con
           EXP_PS_AVX(t2.second);
         }
       }
+      else if (iter.op == opClip) {
+        // clip(a, low, high) = min(max(a, low),high)
+        if (processSingle) {
+          auto t1 = stack1.back();
+          stack1.pop_back();
+          auto t2 = stack1.back();
+          stack1.pop_back();
+          auto &t3 = stack1.back();
+          vmaxps(t3, t3, t2);
+          vminps(t3, t3, t1);
+        }
+        else {
+          auto t1 = stack.back();
+          stack.pop_back();
+          auto t2 = stack.back();
+          stack.pop_back();
+          auto &t3 = stack.back();
+          vmaxps(t3.first, t3.first, t2.first);
+          vminps(t3.first, t3.first, t1.first);
+          vmaxps(t3.second, t3.second, t2.second);
+          vminps(t3.second, t3.second, t1.second);
+        }
+      }
     }
   }
 /*
@@ -3121,7 +3153,7 @@ generated epilog example (new):
 
     // increase read and write pointers by 16 pixels
     const int EXTRA = 2; // output pointer, xcounter
-    if (sizeof(void *) == 8) {
+    if constexpr(sizeof(void *) == 8) {
       // x64: two 8 byte pointers in an xmm
       int numIter = (numInputs + EXTRA + 1) / 2;
 
@@ -3169,7 +3201,7 @@ generated epilog example (new):
 ********************************************************************/
 
 extern const AVSFunction Exprfilter_filters[] = {
-  { "Expr", BUILTIN_FUNC_PREFIX, "c+s+[format]s[optAvx2]b[optSingleMode]b[optSSE2]b", Exprfilter::Create },
+  { "Expr", BUILTIN_FUNC_PREFIX, "c+s+[format]s[optAvx2]b[optSingleMode]b[optSSE2]b[scale_inputs]s[clamp_float]b", Exprfilter::Create },
   { 0 }
 };
 
@@ -3227,7 +3259,7 @@ AVSValue __cdecl Exprfilter::Create(AVSValue args, void* , IScriptEnvironment* e
       expressions[0] = exprarg.AsString();
     }
     else {
-      env->ThrowError("Invalid parameter type for expression string");
+      env->ThrowError("Expr: Invalid parameter type for expression string");
     }
   }
 
@@ -3264,7 +3296,12 @@ AVSValue __cdecl Exprfilter::Create(AVSValue args, void* , IScriptEnvironment* e
   }
   next_paramindex++;
 
-  return new Exprfilter(children, expressions, newformat, optAvx2, optSingleMode, optSSE2, env);
+  const std::string scale_inputs = args[next_paramindex].Defined() ? args[next_paramindex].AsString("none") : "none";
+  next_paramindex++;
+
+  const bool clamp_float = args[next_paramindex].AsBool(false);
+
+  return new Exprfilter(children, expressions, newformat, optAvx2, optSingleMode, optSSE2, scale_inputs, clamp_float, env);
 
 }
 
@@ -3291,19 +3328,19 @@ PVideoFrame __stdcall Exprfilter::GetFrame(int n, IScriptEnvironment *env) {
   const float framecount = (float)n; // max precision: 2^24 (16M) frames (32 bit float precision)
   const float relative_time = (float)((double)n / vi.num_frames); // 0 <= time < 1
 
-  int planes_y[4] = { PLANAR_Y, PLANAR_U, PLANAR_V, PLANAR_A };
-  int planes_r[4] = { PLANAR_G, PLANAR_B, PLANAR_R, PLANAR_A };
-  int *plane_enums = (d.vi.IsYUV() || d.vi.IsYUVA()) ? planes_y : planes_r;
+  const int planes_y[4] = { PLANAR_Y, PLANAR_U, PLANAR_V, PLANAR_A };
+  const int planes_r[4] = { PLANAR_R, PLANAR_G, PLANAR_B, PLANAR_A }; // expression string order is R G B unlike internal G B R plane order
+  const int *plane_enums_d = (d.vi.IsYUV() || d.vi.IsYUVA()) ? planes_y : planes_r;
 
   for (int plane = 0; plane < d.vi.NumComponents(); plane++) {
 
-    const int plane_enum = plane_enums[plane];
+    const int plane_enum_d = plane_enums_d[plane];
 
     if (d.plane[plane] == poProcess) {
-      uint8_t *dstp = dst->GetWritePtr(plane_enum);
-      int dst_stride = dst->GetPitch(plane_enum);
-      int h = d.vi.height >> d.vi.GetPlaneHeightSubsampling(plane_enum);
-      int w = d.vi.width >> d.vi.GetPlaneWidthSubsampling(plane_enum);
+      uint8_t *dstp = dst->GetWritePtr(plane_enum_d);
+      int dst_stride = dst->GetPitch(plane_enum_d);
+      int h = d.vi.height >> d.vi.GetPlaneHeightSubsampling(plane_enum_d);
+      int w = d.vi.width >> d.vi.GetPlaneWidthSubsampling(plane_enum_d);
 
       // for simd:
       const int pixels_per_iter = (optAvx2 && d.planeOptAvx2[plane]) ? (optSingleMode ? 8 : 16) : (optSingleMode ? 4 : 8);
@@ -3314,10 +3351,15 @@ PVideoFrame __stdcall Exprfilter::GetFrame(int n, IScriptEnvironment *env) {
       for (int i = 0; i < numInputs; i++) {
         if (d.node[i]) {
           if (d.clipsUsed[i]) {
-            srcp[i] = src[i]->GetReadPtr(plane_enum);
+            // when input is a single Y, use PLANAR_Y instead of the plane matching to the output
+            const VideoInfo& vi_src = d.node[i]->GetVideoInfo();
+            const int *plane_enums_s = (vi_src.IsYUV() || d.vi.IsYUVA()) ? planes_y : planes_r;
+            const int plane_enum_s = vi_src.IsY() ? PLANAR_Y : plane_enums_d[plane];
+
+            srcp[i] = src[i]->GetReadPtr(plane_enum_s);
             // C only:
             srcp_orig[i] = srcp[i];
-            src_stride[i] = src[i]->GetPitch(plane_enum);
+            src_stride[i] = src[i]->GetPitch(plane_enum_s);
             // SIMD only
             ptroffsets[RWPTR_START_OF_INPUTS + i] = d.node[i]->GetVideoInfo().ComponentSize() * pixels_per_iter; // 1..Nth: inputs
           }
@@ -3487,6 +3529,11 @@ PVideoFrame __stdcall Exprfilter::GetFrame(int n, IScriptEnvironment *env) {
                 --si;
                 stacktop = std::pow(stack[si], stacktop);
                 break;
+              case opClip:
+                // clip(a, low, high) = min(max(a, low),high)
+                si -= 2;
+                stacktop = std::max(std::min(stack[si], stacktop), stack[si + 1]);
+                break;
               case opSqrt:
                 stacktop = std::sqrt(stacktop);
                 break;
@@ -3595,17 +3642,22 @@ PVideoFrame __stdcall Exprfilter::GetFrame(int n, IScriptEnvironment *env) {
     else if (d.plane[plane] == poCopy) {
       // avs+ copy from Nth clip
       const int copySource = d.planeCopySourceClip[plane];
-      env->BitBlt(dst->GetWritePtr(plane_enum), dst->GetPitch(plane_enum),
-        src[copySource]->GetReadPtr(plane_enum),
-        src[copySource]->GetPitch(plane_enum),
-        src[copySource]->GetRowSize(plane_enum),
-        src[copySource]->GetHeight(plane_enum)
+      // when input is a single Y, use PLANAR_Y instead of the plane matching to the output
+      const VideoInfo& vi_src = d.node[copySource]->GetVideoInfo();
+      const int *plane_enums_s = (vi_src.IsYUV() || d.vi.IsYUVA()) ? planes_y : planes_r;
+      const int plane_enum_s = vi_src.IsY() ? PLANAR_Y : plane_enums_d[plane];
+
+      env->BitBlt(dst->GetWritePtr(plane_enum_d), dst->GetPitch(plane_enum_d),
+        src[copySource]->GetReadPtr(plane_enum_s),
+        src[copySource]->GetPitch(plane_enum_s),
+        src[copySource]->GetRowSize(plane_enum_s),
+        src[copySource]->GetHeight(plane_enum_s)
       );
     }
     else if (d.plane[plane] == poFill) { // avs+
-      uint8_t *dstp = dst->GetWritePtr(plane_enum);
-      const int dst_stride = dst->GetPitch(plane_enum);
-      const int h = dst->GetHeight(plane_enum);
+      uint8_t *dstp = dst->GetWritePtr(plane_enum_d);
+      const int dst_stride = dst->GetPitch(plane_enum_d);
+      const int h = dst->GetHeight(plane_enum_d);
 
       int val;
 
@@ -3670,14 +3722,19 @@ static SOperation getStoreOp(const VideoInfo *vi) {
   }
 }
 
-#define LOAD_OP(op,v,req) do { if (stackSize < req) env->ThrowError("Not enough elements on stack to perform operation %s", tokens[i].c_str()); ops.push_back(ExprOp(op, (v))); maxStackSize = std::max(++stackSize, maxStackSize); } while(0)
-#define LOAD_REL_OP(op,v,req,dx,dy) do { if (stackSize < req) env->ThrowError("Not enough elements on stack to perform operation %s", tokens[i].c_str()); ops.push_back(ExprOp(op, (v), (dx), (dy))); maxStackSize = std::max(++stackSize, maxStackSize); } while(0)
-#define GENERAL_OP(op, v, req, dec) do { if (stackSize < req) env->ThrowError("Not enough elements on stack to perform operation %s", tokens[i].c_str()); ops.push_back(ExprOp(op, (v))); stackSize-=(dec); } while(0)
+#define LOAD_OP(op,v,req) do { if (stackSize < req) env->ThrowError("Expr: Not enough elements on stack to perform operation %s", tokens[i].c_str()); ops.push_back(ExprOp(op, (v))); maxStackSize = std::max(++stackSize, maxStackSize); } while(0)
+#define LOAD_REL_OP(op,v,req,dx,dy) do { if (stackSize < req) env->ThrowError("Expr: Not enough elements on stack to perform operation %s", tokens[i].c_str()); ops.push_back(ExprOp(op, (v), (dx), (dy))); maxStackSize = std::max(++stackSize, maxStackSize); } while(0)
+#define GENERAL_OP(op, v, req, dec) do { if (stackSize < req) env->ThrowError("Expr: Not enough elements on stack to perform operation %s", tokens[i].c_str()); ops.push_back(ExprOp(op, (v))); stackSize-=(dec); } while(0)
 #define ONE_ARG_OP(op) GENERAL_OP(op, 0, 1, 0)
 #define VAR_STORE_OP(op,v) GENERAL_OP(op, v, 1, 0)
 #define VAR_STORE_SPEC_OP(op,v) GENERAL_OP(op, v, 1, 1)
 #define TWO_ARG_OP(op) GENERAL_OP(op, 0, 2, 1)
 #define THREE_ARG_OP(op) GENERAL_OP(op, 0, 3, 2)
+// defines for special scale-back-before-store where no token is in context:
+#define LOAD_OP_NOTOKEN(op,v,req) do { if (stackSize < req) env->ThrowError("Expr: Not enough elements on stack to perform a load operation"); ops.push_back(ExprOp(op, (v))); maxStackSize = std::max(++stackSize, maxStackSize); } while(0)
+#define GENERAL_OP_NOTOKEN(op, v, req, dec) do { if (stackSize < req) env->ThrowError("Expr: Not enough elements on stack to perform an operation"); ops.push_back(ExprOp(op, (v))); stackSize-=(dec); } while(0)
+#define TWO_ARG_OP_NOTOKEN(op) GENERAL_OP_NOTOKEN(op, 0, 2, 1)
+
 
 // finds _X suffix (clip letter) and returns 0..25 for x,y,z,a,b,...w
 // no suffix means 0
@@ -3703,7 +3760,9 @@ static int getSuffix(std::string token, std::string base) {
   return loadIndex;
 }
 
-static size_t parseExpression(const std::string &expr, std::vector<ExprOp> &ops, const VideoInfo **vi, const VideoInfo *vi_output, const SOperation storeOp, int numInputs, int planewidth, int planeheight, bool chroma, IScriptEnvironment *env)
+static size_t parseExpression(const std::string &expr, std::vector<ExprOp> &ops, const VideoInfo **vi, const VideoInfo *vi_output, const SOperation storeOp, int numInputs, int planewidth, int planeheight, bool chroma, 
+  const bool autoconv_full_scale, const bool autoconv_conv_int, const bool autoconv_conv_float, const bool clamp_float,
+  IScriptEnvironment *env)
 {
     // vi_output is new in avs+, and is not used yet
 
@@ -3754,6 +3813,8 @@ static size_t parseExpression(const std::string &expr, std::vector<ExprOp> &ops,
           ONE_ARG_OP(opAcos);
         else if (tokens[i] == "atan")
           ONE_ARG_OP(opAtan);
+        else if (tokens[i] == "clip")
+          THREE_ARG_OP(opClip);
         else if (tokens[i] == ">")
             TWO_ARG_OP(opGt);
         else if (tokens[i] == "<")
@@ -3784,11 +3845,11 @@ static size_t parseExpression(const std::string &expr, std::vector<ExprOp> &ops,
               try {
                 int tmp = std::stoi(tokens[i].substr(3));
                 if (tmp < 0)
-                  env->ThrowError("Dup suffix can't be less than 0 '%s'", tokens[i].c_str());
+                  env->ThrowError("Expr: Dup suffix can't be less than 0 '%s'", tokens[i].c_str());
                 LOAD_OP(opDup, tmp, (size_t)(tmp + 1));
               }
               catch (std::logic_error &) {
-                env->ThrowError("Failed to convert dup suffix '%s' to valid index", tokens[i].c_str());
+                env->ThrowError("Expr: Failed to convert dup suffix '%s' to valid index", tokens[i].c_str());
               }
             }
         else if (tokens[i].substr(0, 4) == "swap")
@@ -3799,11 +3860,11 @@ static size_t parseExpression(const std::string &expr, std::vector<ExprOp> &ops,
               try {
                 int tmp = std::stoi(tokens[i].substr(4));
                 if (tmp < 1)
-                  env->ThrowError("Swap suffix can't be less than 1 '%s'", tokens[i].c_str());
+                  env->ThrowError("Expr: Swap suffix can't be less than 1 '%s'", tokens[i].c_str());
                 GENERAL_OP(opSwap, tmp, (size_t)(tmp + 1), 0);
               }
               catch (std::logic_error &) {
-                env->ThrowError("Failed to convert swap suffix '%s' to valid index", tokens[i].c_str());
+                env->ThrowError("Expr: Failed to convert swap suffix '%s' to valid index", tokens[i].c_str());
               }
             }
         else if (tokens[i] == "sx") { // avs+
@@ -3841,6 +3902,7 @@ static size_t parseExpression(const std::string &expr, std::vector<ExprOp> &ops,
           LOAD_OP(opLoadConst, (float)planeheight, 0);
         }
         else if (tokens[i].length() == 1 && tokens[i][0] >= 'a' && tokens[i][0] <= 'z') {
+          // loading source clip pixels
           char srcChar = tokens[i][0];
           int loadIndex;
           if (srcChar >= 'x')
@@ -3848,9 +3910,73 @@ static size_t parseExpression(const std::string &expr, std::vector<ExprOp> &ops,
           else
             loadIndex = srcChar - 'a' + 3;
           if (loadIndex >= numInputs)
-            env->ThrowError("Too few input clips supplied to reference '%s'", tokens[i].c_str());
+            env->ThrowError("Expr: Too few input clips supplied to reference '%s'", tokens[i].c_str());
           LOAD_OP(getLoadOp(vi[loadIndex], false), loadIndex, 0);
-        } 
+
+          // avs+: 'scale_inputs': converts input pixels to a common specified range
+          // Apply to integer and/or float bit depths.
+          // For integers bit-shift or full-scale-stretch method can be chosen
+          // There is no precision loss, since the multiplication/division occurs when original pixels 
+          // are already loaded as float
+          const int realSourceBitdepth = vi[loadIndex]->BitsPerComponent();
+          // need any conversion?
+          if (autoScaleSourceBitDepth != realSourceBitdepth && (autoconv_conv_int || autoconv_conv_float)) {
+            if (autoconv_conv_int && realSourceBitdepth != 32) {
+              // convert from integer to other integer (float: not supported as an internal scale target)
+              if (autoScaleSourceBitDepth == 32)
+                env->ThrowError("Expr: cannot use scale_inputs with 32bit float as internal scale target (f32)");
+              if (autoconv_full_scale) {
+                // e.g. conversion from 8 to 16 bits fullscale: /255.0*65535.0
+                const float strech_mul = (float)(1 << (autoScaleSourceBitDepth - 1)) / (float)(1 << (realSourceBitdepth - 1));
+                LOAD_OP(opLoadConst, strech_mul, 0);
+                TWO_ARG_OP(opMul);
+              }
+              else {
+                if (autoScaleSourceBitDepth > realSourceBitdepth)
+                {
+                  // not fullscale, e.g. conversion from 8 to 16 bits YUV: *256
+                  const float shift_mul = (float)(1 << (autoScaleSourceBitDepth - realSourceBitdepth));
+                  LOAD_OP(opLoadConst, shift_mul, 0);
+                  TWO_ARG_OP(opMul);
+                }
+                else {
+                  // not fullscale, e.g. conversion from 16 to 8 bits YUV: /256
+                  const float shift_mul = 1.0f / (float)(1 << (realSourceBitdepth - autoScaleSourceBitDepth));
+                  LOAD_OP(opLoadConst, shift_mul, 0);
+                  TWO_ARG_OP(opMul);
+                }
+              }
+            }
+            else if (autoconv_conv_float && realSourceBitdepth == 32) {
+              // convert from float to 8-16 bit integer
+              // no difference between autoconv_full_scale or not
+              // scale 32 bits (0..1.0) -> 8-16 bits
+              // for new 0-based chroma: -0.5..0.5 -> 8*16 bits 0..max-1;
+              // for old 0.5-based chroma: 0.0..1.0 -> 8*16 bits 0..max-1;
+              if (chroma) {
+                // (x-src_middle_chroma)*factor + target_middle_chroma
+#ifdef FLOAT_CHROMA_IS_HALF_CENTERED
+                LOAD_OP(opLoadConst, 0.5f, 0);
+                TWO_ARG_OP(opSub);
+#endif
+                float q = (float)((1 << autoScaleSourceBitDepth) - 1);
+                LOAD_OP(opLoadConst, q, 0);
+                TWO_ARG_OP(opMul);
+
+                int target_middle_chroma = 1 << (autoScaleSourceBitDepth - 1);
+                LOAD_OP(opLoadConst, (float)target_middle_chroma, 0);
+                TWO_ARG_OP(opAdd);
+              }
+              else
+              {
+                // conversion from float: mul by max_pixel_value
+                float q = (float)((1 << autoScaleSourceBitDepth) - 1);
+                LOAD_OP(opLoadConst, q, 0);
+                TWO_ARG_OP(opMul);
+              }
+            }
+          } // end of scale inputs
+        }
         else if (tokens[i].length() == 1 && tokens[i][0] >= 'A' && tokens[i][0] <= 'Z') { // avs+
           // use of a variable: single uppercase letter A..Z
           char srcChar = tokens[i][0];
@@ -3867,7 +3993,7 @@ static size_t parseExpression(const std::string &expr, std::vector<ExprOp> &ops,
           else if (tokens[i][1] == '@')
             VAR_STORE_OP(opStoreVar, loadIndex);
           else
-            env->ThrowError("Invalid character, '^' or '@' expected in '%s'", tokens[i].c_str());
+            env->ThrowError("Expr: Invalid character, '^' or '@' expected in '%s'", tokens[i].c_str());
         }
         // indexed clips e.g. x[-1,-2]
         else if (tokens[i].length() > 1 && tokens[i][0] >= 'a' && tokens[i][0] <= 'z' && tokens[i][1] == '[') {
@@ -3878,7 +4004,7 @@ static size_t parseExpression(const std::string &expr, std::vector<ExprOp> &ops,
           else
             loadIndex = srcChar - 'a' + 3;
           if (loadIndex >= numInputs)
-            env->ThrowError("Too few input clips supplied to reference '%s'", tokens[i].c_str());
+            env->ThrowError("Expr: Too few input clips supplied to reference '%s'", tokens[i].c_str());
 
           int dx, dy;
           std::string s;
@@ -3886,23 +4012,23 @@ static size_t parseExpression(const std::string &expr, std::vector<ExprOp> &ops,
           numStream.imbue(std::locale::classic());
           // first coord
           if (!(numStream >> dx))
-            env->ThrowError("Failed to convert '%s' to integer, relative index dx", tokens[i].c_str());
+            env->ThrowError("Expr: Failed to convert '%s' to integer, relative index dx", tokens[i].c_str());
           // separator ','
           if (numStream.get() != ',')
-            env->ThrowError("Failed to convert '%s', character ',' expected between the coordinates", tokens[i].c_str());
+            env->ThrowError("Expr: Failed to convert '%s', character ',' expected between the coordinates", tokens[i].c_str());
           // second coord
           if (!(numStream >> dy))
-            env->ThrowError("Failed to convert '%s' to integer, relative index dy", tokens[i].c_str());
+            env->ThrowError("Expr: Failed to convert '%s' to integer, relative index dy", tokens[i].c_str());
           // ending ']'
           if (numStream.get() != ']')
-            env->ThrowError("Failed to convert '%s' to [x,y], closing ']' expected ", tokens[i].c_str());
+            env->ThrowError("Expr: Failed to convert '%s' to [x,y], closing ']' expected ", tokens[i].c_str());
           if(numStream >> s)
-            env->ThrowError("Failed to convert '%s' to [x,y], invalid character after ']'", tokens[i].c_str());
+            env->ThrowError("Expr: Failed to convert '%s' to [x,y], invalid character after ']'", tokens[i].c_str());
 
           if(dx <= -vi_output->width || dx >= vi_output->width)
-            env->ThrowError("dx must be between +/- (width-1) in '%s'", tokens[i].c_str());
+            env->ThrowError("Expr: dx must be between +/- (width-1) in '%s'", tokens[i].c_str());
           if (dy <= -vi_output->height || dy >= vi_output->height) 
-            env->ThrowError("dy must be between +/- (height-1) in '%s'", tokens[i].c_str());
+            env->ThrowError("Expr: dy must be between +/- (height-1) in '%s'", tokens[i].c_str());
           LOAD_REL_OP(getLoadOp(vi[loadIndex], true), loadIndex, 0, dx, dy);
         }
         else if (tokens[i] == "pi") // avs+
@@ -3919,7 +4045,7 @@ static size_t parseExpression(const std::string &expr, std::vector<ExprOp> &ops,
         //   range_half : autoscaled 128 or 0.5 for float, (or 0.0 for chroma with zero-base float chroma version)
         //   range_max  : 255 / 1023 / 4095 / 16383 / 65535 or 1.0 for float
         //                                                     0.5 for float chroma (new zero-based style)
-        //   range_min  : 0 for 8-16bits, or 0 for float
+        //   range_min  : 0 for 8-16bits, or 0 for float luma, or -0.5 for float chroma
         //                -0.5 for float chroma (new zero-based style)
         //   range_size : 256 / 1024...65536
         //   ymin, ymax : 16 / 235 autoscaled.
@@ -3935,9 +4061,9 @@ static size_t parseExpression(const std::string &expr, std::vector<ExprOp> &ops,
           if (tokens[i].substr(0, toFind.length()) == toFind)
             loadIndex = getSuffix(tokens[i], toFind);
           if (loadIndex < 0)
-            env->ThrowError("Error in built-in constant expression '%s'", tokens[i].c_str());
+            env->ThrowError("Expr: Error in built-in constant expression '%s'", tokens[i].c_str());
           if (loadIndex >= numInputs)
-            env->ThrowError("Too few input clips supplied for reference '%s'", tokens[i].c_str());
+            env->ThrowError("Expr: Too few input clips supplied for reference '%s'", tokens[i].c_str());
 
           int bitsPerComponent = vi[loadIndex]->BitsPerComponent();
           float q = (float)bitsPerComponent;
@@ -3955,9 +4081,9 @@ static size_t parseExpression(const std::string &expr, std::vector<ExprOp> &ops,
           if (tokens[i].substr(0, toFind.length()) == toFind)
             loadIndex = getSuffix(tokens[i], toFind);
           if (loadIndex < 0)
-            env->ThrowError("Error in built-in constant expression '%s'", tokens[i].c_str());
+            env->ThrowError("Expr: Error in built-in constant expression '%s'", tokens[i].c_str());
           if (loadIndex >= numInputs)
-            env->ThrowError("Too few input clips supplied for reference '%s'", tokens[i].c_str());
+            env->ThrowError("Expr: Too few input clips supplied for reference '%s'", tokens[i].c_str());
 
           int bitsPerComponent = vi[loadIndex]->BitsPerComponent();
           float q = bitsPerComponent == 32 ? 16.0f / 255 : (16 << (bitsPerComponent - 8)); // scale luma min 16
@@ -3970,9 +4096,9 @@ static size_t parseExpression(const std::string &expr, std::vector<ExprOp> &ops,
           if (tokens[i].substr(0, toFind.length()) == toFind)
             loadIndex = getSuffix(tokens[i], toFind);
           if (loadIndex < 0)
-            env->ThrowError("Error in built-in constant expression '%s'", tokens[i].c_str());
+            env->ThrowError("Expr: Error in built-in constant expression '%s'", tokens[i].c_str());
           if (loadIndex >= numInputs)
-            env->ThrowError("Too few input clips supplied for reference '%s'", tokens[i].c_str());
+            env->ThrowError("Expr: Too few input clips supplied for reference '%s'", tokens[i].c_str());
 
           int bitsPerComponent = vi[loadIndex]->BitsPerComponent();
           float q = bitsPerComponent == 32 ? 235.0f / 255 : (235 << (bitsPerComponent - 8)); // scale luma max 235
@@ -3985,9 +4111,9 @@ static size_t parseExpression(const std::string &expr, std::vector<ExprOp> &ops,
           if (tokens[i].substr(0, toFind.length()) == toFind)
             loadIndex = getSuffix(tokens[i], toFind);
           if (loadIndex < 0)
-            env->ThrowError("Error in built-in constant expression '%s'", tokens[i].c_str());
+            env->ThrowError("Expr: Error in built-in constant expression '%s'", tokens[i].c_str());
           if (loadIndex >= numInputs)
-            env->ThrowError("Too few input clips supplied for reference '%s'", tokens[i].c_str());
+            env->ThrowError("Expr: Too few input clips supplied for reference '%s'", tokens[i].c_str());
 
           int bitsPerComponent = vi[loadIndex]->BitsPerComponent();
           float q = bitsPerComponent == 32 ? uv8tof(16) : (16 << (bitsPerComponent - 8)); // scale chroma min 16
@@ -4000,9 +4126,9 @@ static size_t parseExpression(const std::string &expr, std::vector<ExprOp> &ops,
           if (tokens[i].substr(0, toFind.length()) == toFind)
             loadIndex = getSuffix(tokens[i], toFind);
           if (loadIndex < 0)
-            env->ThrowError("Error in built-in constant expression '%s'", tokens[i].c_str());
+            env->ThrowError("Expr: Error in built-in constant expression '%s'", tokens[i].c_str());
           if (loadIndex >= numInputs)
-            env->ThrowError("Too few input clips supplied for reference '%s'", tokens[i].c_str());
+            env->ThrowError("Expr: Too few input clips supplied for reference '%s'", tokens[i].c_str());
 
           int bitsPerComponent = vi[loadIndex]->BitsPerComponent();
           float q = bitsPerComponent == 32 ? uv8tof(240) : (240 << (bitsPerComponent - 8)); // scale chroma max 240
@@ -4015,9 +4141,9 @@ static size_t parseExpression(const std::string &expr, std::vector<ExprOp> &ops,
           if (tokens[i].substr(0, toFind.length()) == toFind)
             loadIndex = getSuffix(tokens[i], toFind);
           if (loadIndex < 0)
-            env->ThrowError("Error in built-in constant expression '%s'", tokens[i].c_str());
+            env->ThrowError("Expr: Error in built-in constant expression '%s'", tokens[i].c_str());
           if (loadIndex >= numInputs)
-            env->ThrowError("Too few input clips supplied for reference '%s'", tokens[i].c_str());
+            env->ThrowError("Expr: Too few input clips supplied for reference '%s'", tokens[i].c_str());
 
           int bitsPerComponent = vi[loadIndex]->BitsPerComponent();
           float q = bitsPerComponent == 32 ? 1.0f : (1 << bitsPerComponent); // 1.0, 256, 1024,... 65536
@@ -4030,13 +4156,13 @@ static size_t parseExpression(const std::string &expr, std::vector<ExprOp> &ops,
           if (tokens[i].substr(0, toFind.length()) == toFind)
             loadIndex = getSuffix(tokens[i], toFind);
           if (loadIndex < 0)
-            env->ThrowError("Error in built-in constant expression '%s'", tokens[i].c_str());
+            env->ThrowError("Expr: Error in built-in constant expression '%s'", tokens[i].c_str());
           if (loadIndex >= numInputs)
-            env->ThrowError("Too few input clips supplied for reference '%s'", tokens[i].c_str());
+            env->ThrowError("Expr: Too few input clips supplied for reference '%s'", tokens[i].c_str());
 
           int bitsPerComponent = vi[loadIndex]->BitsPerComponent();
-          // 0.0 (or -0.5 for zero based 32bit float chroma), 255, 1023,... 65535
-          float q = bitsPerComponent == 32 ? (chroma ? uv8tof(128) - 0.5f : 0.0f) : ((1 << bitsPerComponent) - 1);
+          // 0.0 (or -0.5 for zero based 32bit float chroma)
+          float q = bitsPerComponent == 32 ? (chroma ? uv8tof(128) - 0.5f : 0.0f) : 0;
           LOAD_OP(opLoadConst, q, 0);
         }
         else if (tokens[i].substr(0, 9) == "range_max") // avs+
@@ -4046,9 +4172,9 @@ static size_t parseExpression(const std::string &expr, std::vector<ExprOp> &ops,
           if (tokens[i].substr(0, toFind.length()) == toFind)
             loadIndex = getSuffix(tokens[i], toFind);
           if (loadIndex < 0)
-            env->ThrowError("Error in built-in constant expression '%s'", tokens[i].c_str());
+            env->ThrowError("Expr: Error in built-in constant expression '%s'", tokens[i].c_str());
           if (loadIndex >= numInputs)
-            env->ThrowError("Too few input clips supplied for reference '%s'", tokens[i].c_str());
+            env->ThrowError("Expr: Too few input clips supplied for reference '%s'", tokens[i].c_str());
 
           int bitsPerComponent = vi[loadIndex]->BitsPerComponent();
           // 1.0 (or 0.5 for zero based 32bit float chroma), 255, 1023,... 65535
@@ -4062,11 +4188,12 @@ static size_t parseExpression(const std::string &expr, std::vector<ExprOp> &ops,
           if (tokens[i].substr(0, toFind.length()) == toFind)
             loadIndex = getSuffix(tokens[i], toFind);
           if (loadIndex < 0)
-            env->ThrowError("Error in built-in constant expression '%s'", tokens[i].c_str());
+            env->ThrowError("Expr: Error in built-in constant expression '%s'", tokens[i].c_str());
           if (loadIndex >= numInputs)
-            env->ThrowError("Too few input clips supplied for reference '%s'", tokens[i].c_str());
+            env->ThrowError("Expr: Too few input clips supplied for reference '%s'", tokens[i].c_str());
 
           int bitsPerComponent = vi[loadIndex]->BitsPerComponent();
+          // for chroma: range_half is 0.0 for 32bit float (or 0.5 for old float chroma representation)
           float q = bitsPerComponent == 32 ? (chroma ? uv8tof(128) : 0.5f) : (1 << (bitsPerComponent - 1)); // 0.5f, 128, 512, ... 32768
           LOAD_OP(opLoadConst, q, 0);
         }
@@ -4080,8 +4207,8 @@ static size_t parseExpression(const std::string &expr, std::vector<ExprOp> &ops,
             // upscale
             if (targetBitDepth == 32) { // upscale to float
               // divide by max, e.g. x -> x/255
-#ifdef FLOAT_CHROMA_IS_ZERO_CENTERED
-              // for new 0-based chroma: x -> (x-src_chroma_middle)/factor;
+              // for new 0-based chroma  : x -> (x-src_chroma_middle)/factor;
+              // for old 0.5 based chroma: x -> (x-src_chroma_middle)/factor + 0.5;
               if (chroma) {
                 int src_middle_chroma = 1 << (autoScaleSourceBitDepth - 1);
                 LOAD_OP(opLoadConst, (float)src_middle_chroma, 0);
@@ -4090,11 +4217,14 @@ static size_t parseExpression(const std::string &expr, std::vector<ExprOp> &ops,
                 float q = (float)((1 << autoScaleSourceBitDepth) - 1);
                 LOAD_OP(opLoadConst, 1.0f / q, 0);
                 TWO_ARG_OP(opMul);
+#ifdef FLOAT_CHROMA_IS_HALF_CENTERED
+                LOAD_OP(opLoadConst, 0.5f, 0);
+                TWO_ARG_OP(opAdd);
+#endif
+                // (x-src_middle_chroma)/factor + target_chroma_middle
               }
               else
-#endif
               {
-                // for chroma it would be correct: x -> (x-src_chroma_middle)/factor + src_chroma_middle
                 float q = (float)((1 << autoScaleSourceBitDepth) - 1);
                 LOAD_OP(opLoadConst, 1.0f / q, 0);
                 TWO_ARG_OP(opMul);
@@ -4113,9 +4243,14 @@ static size_t parseExpression(const std::string &expr, std::vector<ExprOp> &ops,
             // downscale
             if (autoScaleSourceBitDepth == 32) {
               // scale 32 bits (0..1.0) -> 8-16 bits
-#ifdef FLOAT_CHROMA_IS_ZERO_CENTERED
               // for new 0-based chroma: -0.5..0.5 -> 8*16 bits 0..max-1;
+              // for old 0.5-based chroma: 0.0..1.0 -> 8*16 bits 0..max-1;
               if (chroma) {
+                // (x-src_middle_chroma)*factor + target_middle_chroma
+#ifdef FLOAT_CHROMA_IS_HALF_CENTERED
+                LOAD_OP(opLoadConst, 0.5f, 0);
+                TWO_ARG_OP(opSub);
+#endif
                 float q = (float)((1 << targetBitDepth) - 1);
                 LOAD_OP(opLoadConst, q, 0);
                 TWO_ARG_OP(opMul);
@@ -4125,7 +4260,6 @@ static size_t parseExpression(const std::string &expr, std::vector<ExprOp> &ops,
                 TWO_ARG_OP(opAdd);
               }
               else
-#endif
               {
                 float q = (float)((1 << targetBitDepth) - 1);
                 LOAD_OP(opLoadConst, q, 0);
@@ -4150,9 +4284,25 @@ static size_t parseExpression(const std::string &expr, std::vector<ExprOp> &ops,
           {
             // upscale
             if (targetBitDepth == 32) { // upscale to float
-              float q = (float)((1 << autoScaleSourceBitDepth) - 1); // divide by max, e.g. x -> x/255
-              LOAD_OP(opLoadConst, 1.0f / q, 0);
-              TWO_ARG_OP(opMul);
+              if (chroma) {
+                int src_middle_chroma = 1 << (autoScaleSourceBitDepth - 1);
+                LOAD_OP(opLoadConst, (float)src_middle_chroma, 0);
+                TWO_ARG_OP(opSub);
+
+                float q = (float)((1 << autoScaleSourceBitDepth) - 1); // divide by max, e.g. x -> x/255
+                LOAD_OP(opLoadConst, 1.0f / q, 0);
+                TWO_ARG_OP(opMul);
+                // (x-src_middle_chroma)*factor + target_middle_chroma
+#ifdef FLOAT_CHROMA_IS_HALF_CENTERED
+                LOAD_OP(opLoadConst, 0.5f, 0);
+                TWO_ARG_OP(opAdd);
+#endif
+              }
+              else {
+                float q = (float)((1 << autoScaleSourceBitDepth) - 1); // divide by max, e.g. x -> x/255
+                LOAD_OP(opLoadConst, 1.0f / q, 0);
+                TWO_ARG_OP(opMul);
+              }
             }
             else {
               // keep max pixel value e.g. 8->12 bits: x * 4095.0 / 255.0
@@ -4161,18 +4311,42 @@ static size_t parseExpression(const std::string &expr, std::vector<ExprOp> &ops,
               TWO_ARG_OP(opMul);
             }
           }
-          else if (targetBitDepth < autoScaleSourceBitDepth) // scale constant from 12 bits to 8 bit target: /16
+          else if (targetBitDepth < autoScaleSourceBitDepth)
           {
             // downscale
-            float q;
-            if (autoScaleSourceBitDepth == 32)
-              q = (float)((1 << targetBitDepth) - 1);
-            else {
-              // keep max pixel value e.g. 12->8 bits: x * 255.0 / 4095.0
-              q = (float)((1 << targetBitDepth) - 1) / (float)((1 << autoScaleSourceBitDepth) - 1);
+            if (autoScaleSourceBitDepth == 32) {
+              // float->integer
+              // scale 32 bits (0..1.0) -> 8-16 bits
+              // for new 0-based chroma: -0.5..0.5 -> 8*16 bits 0..max-1;
+              // for old 0.5-based chroma: 0.0..1.0 -> 8*16 bits 0..max-1;
+              if (chroma) {
+                // (x-src_middle_chroma)*factor + target_middle_chroma
+#ifdef FLOAT_CHROMA_IS_HALF_CENTERED
+                LOAD_OP(opLoadConst, 0.5f, 0);
+                TWO_ARG_OP(opSub);
+#endif
+                const float q = (float)((1 << targetBitDepth) - 1);
+                LOAD_OP(opLoadConst, q, 0);
+                TWO_ARG_OP(opMul);
+
+                const int target_middle_chroma = 1 << (targetBitDepth - 1);
+                LOAD_OP(opLoadConst, (float)target_middle_chroma, 0);
+                TWO_ARG_OP(opAdd);
+              }
+              else
+              {
+                const float q = (float)((1 << targetBitDepth) - 1);
+                LOAD_OP(opLoadConst, q, 0);
+                TWO_ARG_OP(opMul);
+              }
             }
-            LOAD_OP(opLoadConst, q, 0);
-            TWO_ARG_OP(opMul);
+            else {
+              // integer->integer
+              // keep max pixel value e.g. 12->8 bits: x * 255.0 / 4095.0
+              const float q = (float)((1 << targetBitDepth) - 1) / (float)((1 << autoScaleSourceBitDepth) - 1);
+              LOAD_OP(opLoadConst, q, 0);
+              TWO_ARG_OP(opMul);
+            }
           }
           else {
             // no scaling is needed. Bit depth of constant is the same as of the reference clip 
@@ -4209,16 +4383,102 @@ static size_t parseExpression(const std::string &expr, std::vector<ExprOp> &ops,
             std::istringstream numStream(tokens[i]);
             numStream.imbue(std::locale::classic());
             if (!(numStream >> f))
-              env->ThrowError("Failed to convert '%s' to float", tokens[i].c_str());
+              env->ThrowError("Expr: Failed to convert '%s' to float", tokens[i].c_str());
             if (numStream >> s)
-              env->ThrowError("Failed to convert '%s' to float, not the whole token could be converted", tokens[i].c_str());
+              env->ThrowError("Expr: Failed to convert '%s' to float, not the whole token could be converted", tokens[i].c_str());
             LOAD_OP(opLoadConst, f, 0);
         }
     }
 
     if (tokens.size() > 0) {
         if (stackSize != 1)
-            env->ThrowError("Stack unbalanced at end of expression. Need to have exactly one value on the stack to return.");
+            env->ThrowError("Expr: Stack unbalanced at end of expression. Need to have exactly one value on the stack to return.");
+
+        // When scale_inputs option was used for scaling input to a common internal range, 
+        // we have to scale pixels before storing them back
+        // need any conversion?
+        if (autoScaleSourceBitDepth != targetBitDepth && (autoconv_conv_int || autoconv_conv_float)) {
+          // We can be sure that internal source was not 32 bits float: 
+          // (was checked during input conversion)
+          if (targetBitDepth != 32 && autoconv_conv_int) {
+            // convert back internal integer to other integer
+            if (autoconv_full_scale) {
+              // e.g. conversion from 8 to 16 bits fullscale: /255.0*65535.0
+              const float strech_mul = (float)(1 << (targetBitDepth - 1)) / (float)(1 << (autoScaleSourceBitDepth - 1));
+              LOAD_OP_NOTOKEN(opLoadConst, strech_mul, 0);
+              TWO_ARG_OP_NOTOKEN(opMul);
+            }
+            else {
+              if (targetBitDepth > autoScaleSourceBitDepth)
+              {
+                // not fullscale, e.g. conversion from 8 to 16 bits YUV: *256
+                const float shift_mul = (float)(1 << (targetBitDepth - autoScaleSourceBitDepth));
+                LOAD_OP_NOTOKEN(opLoadConst, shift_mul, 0);
+                TWO_ARG_OP_NOTOKEN(opMul);
+              }
+              else {
+                // not fullscale, e.g. conversion from 16 to 8 bits YUV: *256
+                const float shift_mul = 1.0f / (float)(1 << (autoScaleSourceBitDepth - targetBitDepth));
+                LOAD_OP_NOTOKEN(opLoadConst, shift_mul, 0);
+                TWO_ARG_OP_NOTOKEN(opMul);
+              }
+            }
+          }
+          else if (targetBitDepth == 32 && autoconv_conv_float) {
+            // For targetBitDepth == 32 we are converting 8-16 bits integer back to float
+            // No difference between full_scale or not
+            // 8-16 bits -> scale 32 bits (0..1.0)
+            // for new 0-based chroma: 8*16 bits 0..max-1 -> -0.5..0.5
+            // for old 0.5-based chroma:8*16 bits 0..max-1 -> 0.0..1.0
+            if (chroma) {
+              // (x-src_middle_chroma)*factor + target_middle_chroma
+              int src_middle_chroma = 1 << (autoScaleSourceBitDepth - 1);
+              LOAD_OP_NOTOKEN(opLoadConst, (float)src_middle_chroma, 0);
+              TWO_ARG_OP_NOTOKEN(opSub);
+
+              float q = (float)((1 << autoScaleSourceBitDepth) - 1);
+              LOAD_OP_NOTOKEN(opLoadConst, 1.0f / q, 0);
+              TWO_ARG_OP_NOTOKEN(opMul);
+
+#ifdef FLOAT_CHROMA_IS_HALF_CENTERED
+              LOAD_OP_NOTOKEN(opLoadConst, 0.5f, 0);
+              TWO_ARG_OP_NOTOKEN(opAdd);
+#endif
+            }
+            else
+            {
+              // 0..max-1 -> 0.0..1.0
+              float q = (float)((1 << autoScaleSourceBitDepth) - 1);
+              LOAD_OP_NOTOKEN(opLoadConst, 1.0f / q, 0);
+              TWO_ARG_OP_NOTOKEN(opMul);
+            }
+          }
+        } // end of scale inputs
+
+        if (clamp_float && targetBitDepth == 32) {
+          if (chroma) {
+#ifdef FLOAT_CHROMA_IS_HALF_CENTERED
+            LOAD_OP_NOTOKEN(opLoadConst, 0.0f, 0);
+            TWO_ARG_OP_NOTOKEN(opMax);
+            LOAD_OP_NOTOKEN(opLoadConst, 1.0f, 0);
+            TWO_ARG_OP_NOTOKEN(opMin);
+#else
+            LOAD_OP_NOTOKEN(opLoadConst, -0.5f, 0);
+            TWO_ARG_OP_NOTOKEN(opMax);
+            LOAD_OP_NOTOKEN(opLoadConst, 0.5f, 0);
+            TWO_ARG_OP_NOTOKEN(opMin);
+#endif
+          }
+          else
+          {
+            LOAD_OP_NOTOKEN(opLoadConst, 0.0f, 0);
+            TWO_ARG_OP_NOTOKEN(opMax);
+            LOAD_OP_NOTOKEN(opLoadConst, 1.0f, 0);
+            TWO_ARG_OP_NOTOKEN(opMin);
+          }
+        }
+
+        // and finally store it
         ops.push_back(storeOp);
     }
 
@@ -4348,6 +4608,7 @@ static int numOperands(uint32_t op) {
             return 2;
 
         case opTernary:
+        case opClip:
             return 3;
     }
 
@@ -4468,6 +4729,7 @@ static std::unordered_map<uint32_t, std::string> op_strings = {
         PAIR(opLE),
         PAIR(opGE),
         PAIR(opTernary),
+        PAIR(opClip),
         PAIR(opAnd),
         PAIR(opOr),
         PAIR(opXor),
@@ -4651,16 +4913,48 @@ static void foldConstants(std::vector<ExprOp> &ops) {
 }
 
 Exprfilter::Exprfilter(const std::vector<PClip>& _child_array, const std::vector<std::string>& _expr_array, const char *_newformat, const bool _optAvx2, 
-  const bool _optSingleMode, const bool _optSSE2, IScriptEnvironment *env) :
-  children(_child_array), expressions(_expr_array), optAvx2(_optAvx2), optSingleMode(_optSingleMode), optSSE2(_optSSE2) {
+  const bool _optSingleMode, const bool _optSSE2, const std::string _scale_inputs, const bool _clamp_float, IScriptEnvironment *env) :
+  children(_child_array), expressions(_expr_array), optAvx2(_optAvx2), optSingleMode(_optSingleMode), optSSE2(_optSSE2), scale_inputs(_scale_inputs), clamp_float(_clamp_float) {
 
   vi = children[0]->GetVideoInfo();
   d.vi = vi;
 
+  // parse "scale_inputs"
+  autoconv_full_scale = false;
+  autoconv_conv_float = false;
+  autoconv_conv_int = false;
+
+  if (scale_inputs == "allf") {
+    autoconv_full_scale = true;
+    autoconv_conv_int = true;
+    autoconv_conv_float = true;
+  }
+  else if (scale_inputs == "intf") {
+    autoconv_full_scale = true;
+    autoconv_conv_int = true;
+  }
+  else if (scale_inputs == "floatf") {
+    autoconv_full_scale = true;
+    autoconv_conv_float = true;
+  }
+  else if (scale_inputs == "all") {
+    autoconv_conv_int = true;
+    autoconv_conv_float = true;
+  }
+  else if (scale_inputs == "int") {
+    autoconv_conv_int = true;
+  }
+  else if (scale_inputs == "float") {
+    autoconv_conv_float = true;
+  }
+  else if (scale_inputs != "none") {
+    env->ThrowError("Expr: scale_inputs must be 'all','allf','int','intf','float','floatf' or 'none'");
+  }
+
   try {
     d.numInputs = (int)children.size(); // d->numInputs = vsapi->propNumElements(in, "clips");
     if (d.numInputs > 26)
-      env->ThrowError("More than 26 input clips provided");
+      env->ThrowError("Expr: More than 26 input clips provided");
     
     for (int i = 0; i < d.numInputs; i++)
       d.node[i] = children[i];
@@ -4673,7 +4967,7 @@ Exprfilter::Exprfilter(const std::vector<PClip>& _child_array, const std::vector
 
 
     int planes_y[4] = { PLANAR_Y, PLANAR_U, PLANAR_V, PLANAR_A };
-    int planes_r[4] = { PLANAR_G, PLANAR_B, PLANAR_R, PLANAR_A };
+    int planes_r[4] = { PLANAR_G, PLANAR_B, PLANAR_R, PLANAR_A }; // for checking GBR order is OK
     int *plane_enums = (d.vi.IsYUV() || d.vi.IsYUVA()) ? planes_y : planes_r;
     const int plane_enum = plane_enums[1]; // for subsampling check U only
 
@@ -4692,31 +4986,53 @@ Exprfilter::Exprfilter(const std::vector<PClip>& _child_array, const std::vector
         )
         || vi_array[0]->width != vi_array[i]->width
         || vi_array[0]->height != vi_array[i]->height)
-        env->ThrowError("All inputs must have the same number of planes and the same dimensions, subsampling included");
+        env->ThrowError("Expr: All inputs must have the same number of planes and the same dimensions, subsampling included");
 
       if (vi_array[i]->IsRGB() && !vi_array[i]->IsPlanar())
-        env->ThrowError("No packed RGB format allowed for clip #%d, use planar RGB instead",i+1);
+        env->ThrowError("Expr: No packed RGB format allowed for clip #%d, use planar RGB instead",i+1);
       if (vi_array[i]->IsYUY2())
-        env->ThrowError("YUY2 format not allowed for clip #%d", i+1);
+        env->ThrowError("Expr: YUY2 format not allowed for clip #%d", i+1);
     }
 
     // format override
     if (_newformat != nullptr) {
       int pixel_type = GetPixelTypeFromName(_newformat);
       if (pixel_type == VideoInfo::CS_UNKNOWN)
-        env->ThrowError("Invalid video format string parameter");
+        env->ThrowError("Expr: Invalid video format string parameter");
       d.vi.pixel_type = pixel_type;
       if(d.vi.IsRGB() && !d.vi.IsPlanar())
-        env->ThrowError("No packed RGB format allowed");
+        env->ThrowError("Expr: No packed RGB format allowed");
       if (d.vi.IsYUY2())
-        env->ThrowError("YUY2 format not allowed");
+        env->ThrowError("Expr: YUY2 format not allowed");
+
+      const bool isSinglePlaneInput = vi_array[0]->IsY();
+
+      // input number of planes >= output planes
+      if (!isSinglePlaneInput && vi_array[0]->NumComponents() < d.vi.NumComponents())
+        env->ThrowError("Expr: number of planes in input should be greater than or equal than of output");
+
+      // subsampling should match
+      int *plane_enums_s = (vi_array[0]->IsYUV() || vi_array[0]->IsYUVA()) ? planes_y : planes_r;
+      int *plane_enums_d = (d.vi.IsYUV() || d.vi.IsYUVA()) ? planes_y : planes_r;
+      for (int p = 0; p < d.vi.NumComponents(); p++) {
+        const int plane_enum_s = isSinglePlaneInput ? plane_enums_s[0] : plane_enums_s[p]; // for Y inputs, reference is Y for each output plane
+        const int plane_enum_d = plane_enums_d[p];
+        if (vi_array[0]->GetPlaneWidthSubsampling(plane_enum_s) != d.vi.GetPlaneWidthSubsampling(plane_enum_d)
+          || vi_array[0]->GetPlaneHeightSubsampling(plane_enum_s) != d.vi.GetPlaneHeightSubsampling(plane_enum_d)) {
+          if(isSinglePlaneInput)
+            env->ThrowError("Expr: output must not be a subsampled format for Y-only input(s)");
+          else
+            env->ThrowError("Expr: inputs and output must have the same subsampling");
+        }
+      }
+
       vi = d.vi;
     }
 
     // check expression count, duplicate omitted expressions from previous one
     int nexpr = (int)expressions.size();
     if (nexpr > d.vi.NumComponents()) // ->numPlanes)
-      env->ThrowError("More expressions given than there are planes");
+      env->ThrowError("Expr: More expressions given than there are planes");
 
     std::string expr[4]; // 4th: alpha
     for (int i = 0; i < nexpr; i++)
@@ -4757,7 +5073,9 @@ Exprfilter::Exprfilter(const std::vector<PClip>& _child_array, const std::vector
       const int planewidth = d.vi.width >> d.vi.GetPlaneWidthSubsampling(plane_enum);
       const int planeheight = d.vi.height >> d.vi.GetPlaneHeightSubsampling(plane_enum);
       const bool chroma = (plane_enum == PLANAR_U || plane_enum == PLANAR_V);
-      d.maxStackSize = std::max(parseExpression(expr[i], d.ops[i], vi_array, &d.vi, getStoreOp(&d.vi), d.numInputs, planewidth, planeheight, chroma, env), d.maxStackSize);
+      d.maxStackSize = std::max(parseExpression(expr[i], d.ops[i], vi_array, &d.vi, getStoreOp(&d.vi), d.numInputs, planewidth, planeheight, chroma, 
+        autoconv_full_scale, autoconv_conv_int, autoconv_conv_float, clamp_float,
+        env), d.maxStackSize);
       foldConstants(d.ops[i]);
 
       // optimize constant store, change operation to "fill"

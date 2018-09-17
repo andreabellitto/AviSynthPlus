@@ -79,6 +79,7 @@ public:
   PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env);
 
   int __stdcall SetCacheHints(int cachehints, int frame_range) override {
+    AVS_UNUSED(frame_range);
     return cachehints == CACHE_GET_MTMODE ? MT_NICE_FILTER : 0;
   }
 
@@ -117,6 +118,18 @@ private:
 };
 
 
+struct RGBAdjustPlaneConfig
+{
+  double scale;
+  double bias;
+  double gamma;
+  bool changed; // for lut recalc
+};
+
+struct RGBAdjustConfig
+{
+  RGBAdjustPlaneConfig rgba[4];
+};
 
 class RGBAdjust : public GenericVideoFilter 
 /**
@@ -127,10 +140,12 @@ public:
   RGBAdjust(PClip _child, double r,  double g,  double b,  double a,
                           double rb, double gb, double bb, double ab,
                           double rg, double gg, double bg, double ag,
-                          bool _analyze, bool _dither, IScriptEnvironment* env);
+                          bool _analyze, bool _dither, bool _conditional, IScriptEnvironment* env);
   PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env);
+  RGBAdjust::~RGBAdjust();
 
   int __stdcall SetCacheHints(int cachehints, int frame_range) override {
+    AVS_UNUSED(frame_range);
     return cachehints == CACHE_GET_MTMODE ? MT_NICE_FILTER : 0;
   }
 
@@ -139,7 +154,13 @@ public:
 private:
   bool analyze;
   bool dither;
-  BYTE *mapR, *mapG, *mapB, *mapA;
+  bool conditional;
+
+  RGBAdjustConfig config;
+
+  size_t number_of_maps;
+  BYTE *map_holder;
+  BYTE *maps[4];
   // avs+
   int pixelsize;
   int bits_per_pixel; // 8,10..16
@@ -158,6 +179,8 @@ private:
 
   unsigned int *accum_r, *accum_g, *accum_b;
 
+  void CheckAndConvertParams(RGBAdjustConfig &config, IScriptEnvironment *env);
+  void rgbadjust_create_lut(BYTE *lut_buf, const int plane, RGBAdjustConfig &config);
 };
 
 
@@ -173,6 +196,7 @@ public:
   PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env);
 
   int __stdcall SetCacheHints(int cachehints, int frame_range) override {
+    AVS_UNUSED(frame_range);
     return cachehints == CACHE_GET_MTMODE ? MT_NICE_FILTER : 0;
   }
 
@@ -228,6 +252,7 @@ public:
   PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env);
 
   int __stdcall SetCacheHints(int cachehints, int frame_range) override {
+    AVS_UNUSED(frame_range);
     return cachehints == CACHE_GET_MTMODE ? MT_NICE_FILTER : 0;
   }
 

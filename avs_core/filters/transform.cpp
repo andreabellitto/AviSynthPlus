@@ -104,6 +104,7 @@ PVideoFrame FlipVertical::GetFrame(int n, IScriptEnvironment* env) {
 
 AVSValue __cdecl FlipVertical::Create(AVSValue args, void*, IScriptEnvironment* env) 
 {
+  AVS_UNUSED(env);
   return new FlipVertical(args[0].AsClip());
 }
 
@@ -224,6 +225,7 @@ PVideoFrame FlipHorizontal::GetFrame(int n, IScriptEnvironment* env) {
 
 AVSValue __cdecl FlipHorizontal::Create(AVSValue args, void*, IScriptEnvironment* env) 
 {
+  AVS_UNUSED(env);
   return new FlipHorizontal(args[0].AsClip());
 }
 
@@ -238,6 +240,7 @@ AVSValue __cdecl FlipHorizontal::Create(AVSValue args, void*, IScriptEnvironment
 Crop::Crop(int _left, int _top, int _width, int _height, bool _align, PClip _child, IScriptEnvironment* env)
  : GenericVideoFilter(_child), align(FRAME_ALIGN - 1), xsub(0), ysub(0)
 {
+  AVS_UNUSED(_align);
   // _align parameter exists only for the backward compatibility.
 
   /* Negative values -> VDub-style syntax
@@ -408,31 +411,16 @@ AddBorders::AddBorders(int _left, int _top, int _right, int _bot, int _clr, PCli
   vi.height += top+bot;
 }
 
-// 8 bit uv to float
-static float uv8tof(int color) {
-#ifdef FLOAT_CHROMA_IS_ZERO_CENTERED
-  const float shift = 0.0f;
-#else
-  const float shift = 0.5f;
-#endif
-  return (color - 128) / 255.0f + shift;
-}
-
-// 8 bit fullscale to float
-static float c8tof(int color) {
-  return color / 255.0f;
-}
-
 template<typename pixel_t>
 static inline pixel_t GetHbdColorFromByte(uint8_t color, bool fullscale, int bits_per_pixel, bool chroma)
 {
-  if (sizeof(pixel_t) == 1) return color;
-  else if (sizeof(pixel_t) == 2) return (pixel_t)(fullscale ? (color * ((1 << bits_per_pixel)-1)) / 255 : (int)color << (bits_per_pixel - 8));
+  if constexpr(sizeof(pixel_t) == 1) return color;
+  else if constexpr(sizeof(pixel_t) == 2) return (pixel_t)(fullscale ? (color * ((1 << bits_per_pixel)-1)) / 255 : (int)color << (bits_per_pixel - 8));
   else {
     if (chroma)
       return (pixel_t)uv8tof(color);  // float, scale, 128=0.0f
     else
-      return (pixel_t)c8tof(color); // float, scale to [0..1) 128=0.5f
+      return (pixel_t)c8tof(color); // float, scale to [0..1]
   }
 }
 

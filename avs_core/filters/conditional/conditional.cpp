@@ -113,6 +113,7 @@ ConditionalSelect::~ConditionalSelect() {
 
 int __stdcall ConditionalSelect::SetCacheHints(int cachehints, int frame_range)
 {
+  AVS_UNUSED(frame_range);
   switch (cachehints)
   {
   case CACHE_GET_MTMODE:
@@ -194,7 +195,7 @@ PVideoFrame __stdcall ConditionalSelect::GetFrame(int n, IScriptEnvironment* env
 }
 
 
-AVSValue __cdecl ConditionalSelect::Create(AVSValue args, void* user_data, IScriptEnvironment* env)
+AVSValue __cdecl ConditionalSelect::Create(AVSValue args, void* , IScriptEnvironment* env)
 {
   int num_args = 0;
   PClip* child_array = 0;
@@ -284,6 +285,7 @@ const char* const t_FALSE="FALSE";
 
 int __stdcall ConditionalFilter::SetCacheHints(int cachehints, int frame_range)
 {
+  AVS_UNUSED(frame_range);
   switch (cachehints)
   {
   case CACHE_GET_MTMODE:
@@ -479,7 +481,7 @@ AVSValue __cdecl ConditionalFilter::Create(AVSValue args, void* user_data, IScri
 
 ScriptClip::ScriptClip(PClip _child, AVSValue  _script, bool _show, bool _only_eval, bool _eval_after_frame, IScriptEnvironment* env) :
   GenericVideoFilter(_child), script(_script), show(_show), only_eval(_only_eval), eval_after(_eval_after_frame) {
-
+  AVS_UNUSED(env);
 }
 
 
@@ -597,12 +599,12 @@ PVideoFrame __stdcall ScriptClip::GetFrame(int n, IScriptEnvironment* env)
 }
 
 
-AVSValue __cdecl ScriptClip::Create(AVSValue args, void* user_data, IScriptEnvironment* env)
+AVSValue __cdecl ScriptClip::Create(AVSValue args, void* , IScriptEnvironment* env)
 {
   return new ScriptClip(args[0].AsClip(), args[1], args[2].AsBool(false),false, args[3].AsBool(false), env);
 }
 
 
-AVSValue __cdecl ScriptClip::Create_eval(AVSValue args, void* user_data, IScriptEnvironment* env)
+AVSValue __cdecl ScriptClip::Create_eval(AVSValue args, void* , IScriptEnvironment* env)
 {
   return new ScriptClip(args[0].AsClip(), args[1], args[2].AsBool(false),true, args[3].AsBool(false), env);}

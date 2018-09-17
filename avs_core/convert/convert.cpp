@@ -195,7 +195,7 @@ static __forceinline __m128i convert_yuy2_to_rgb_sse2_core(const __m128i& src_lu
   r = _mm_srai_epi32(r, 14); //g3 g3 g3 g3 | g2 g2 g2 g2  | g1 g1 g1 g1 | g0 g0 g0 g0
 
 
-  if (rgb_size == 4)
+  if constexpr(rgb_size == 4)
   {
     b = _mm_max_epi16(b, zero);
     g = _mm_max_epi16(g, zero);
@@ -261,7 +261,7 @@ static void convert_yuy2_to_rgb_sse2(const BYTE *srcp, BYTE* dstp, int src_pitch
 
       __m128i rgb = convert_yuy2_to_rgb_sse2_core<rgb_size>(luma_scaled, src_chroma, alpha, v128, zero, rounder, ff, ymul, bmul, gmul, rmul);
 
-      if (rgb_size == 4) {
+      if constexpr(rgb_size == 4) {
         _mm_store_si128(reinterpret_cast<__m128i*>(dstp+x*4), rgb);
       } else {
         //input: 00 | r3 | g3 | b3 | r2 | g2 | b2 | 00 | 00 | r1 | g1 | b1 | r0 | g0 | b0 | 00
@@ -285,7 +285,7 @@ static void convert_yuy2_to_rgb_sse2(const BYTE *srcp, BYTE* dstp, int src_pitch
       luma_scaled = _mm_unpacklo_epi16(luma_scaled, zero); // 0000 | Y1-16 | 0000 | Y0-16
       __m128i rgb = convert_yuy2_to_rgb_sse2_core<rgb_size>(luma_scaled, src_chroma, alpha, v128, zero, rounder, ff, ymul, bmul, gmul, rmul);
 
-      if (rgb_size == 4){
+      if constexpr(rgb_size == 4){
         _mm_storel_epi64(reinterpret_cast<__m128i*>(dstp+width*4-8), rgb);
       } else {
         //input: 00 | 00 | 00 | 00 | 00 | 00 | 00 | 00 | 00 | r1 | g1 | b1 | r0 | g0 | b0 | 00
@@ -309,7 +309,7 @@ static void convert_yuy2_to_rgb_sse2(const BYTE *srcp, BYTE* dstp, int src_pitch
 
       __m128i rgb = convert_yuy2_to_rgb_sse2_core<rgb_size>(luma_scaled, src_chroma, alpha, v128, zero, rounder, ff, ymul, bmul, gmul, rmul);
 
-      if (rgb_size == 4) {
+      if constexpr(rgb_size == 4) {
         _mm_storeu_si128(reinterpret_cast<__m128i*>(dstp+width*4-16), rgb);
       } else {
         //input: 00 | r3 | g3 | b3 | r2 | g2 | b2 | 00 | 00 | r1 | g1 | b1 | r0 | g0 | b0 | 00
@@ -515,7 +515,7 @@ static void convert_yuy2_to_rgb_c(const BYTE *srcp, BYTE* dstp, int src_pitch, i
       dstp[(x+1)*rgb_size + 1] = ScaledPixelClip(scaled_y1 - (u0+u1) * (cgu / 2) - (v0+v1) * (cgv/2)); // green
       dstp[(x+1)*rgb_size + 2] = ScaledPixelClip(scaled_y1                       + (v0+v1) * (crv/2)); // red
 
-      if (rgb_size == 4) {
+      if constexpr(rgb_size == 4) {
         dstp[x*4+3] = 255;
         dstp[x*4+7] = 255;
       }
@@ -534,7 +534,7 @@ static void convert_yuy2_to_rgb_c(const BYTE *srcp, BYTE* dstp, int src_pitch, i
     dstp[(x+1)*rgb_size + 1] = ScaledPixelClip(scaled_y1 - u * cgu - v * cgv); // green
     dstp[(x+1)*rgb_size + 2] = ScaledPixelClip(scaled_y1           + v * crv); // red
 
-    if (rgb_size == 4) {
+    if constexpr(rgb_size == 4) {
       dstp[x*4+3] = 255;
       dstp[x*4+7] = 255;
     }
@@ -600,8 +600,6 @@ AVSValue __cdecl ConvertToRGB::Create(AVSValue args, void* user_data, IScriptEnv
   const char* const matrix = args[1].AsString(0);
   VideoInfo vi = clip->GetVideoInfo();
 
-  // todo bitdepth conversion on-the-fly
-
   // common Create for all CreateRGB24/32/48/64/Planar(RGBP:-1, RGPAP:-2) using user_data
   int target_rgbtype = (int)reinterpret_cast<intptr_t>(user_data);
   // -1,-2: Planar RGB(A)
@@ -610,14 +608,27 @@ AVSValue __cdecl ConvertToRGB::Create(AVSValue args, void* user_data, IScriptEnv
 
   // planar YUV-like
   if (vi.IsPlanar() && (vi.IsYUV() || vi.IsYUVA())) {
+    bool needConvertFinalBitdepth = false;
+    int finalBitdepth = -1;
+
     AVSValue new_args[5] = { clip, args[2], args[1], args[3], args[4] };
     // conversion to planar or packed RGB is always from 444
     clip = ConvertToPlanarGeneric::CreateYUV444(AVSValue(new_args, 5), NULL, env).AsClip();
-    if((target_rgbtype==24 || target_rgbtype==32) && vi.ComponentSize()!=1)
-        env->ThrowError("ConvertToRGB%d: conversion is allowed only from 8 bit colorspace",target_rgbtype);
-    if((target_rgbtype==48 || target_rgbtype==64) && vi.BitsPerComponent() != 16)
-        env->ThrowError("ConvertToRGB%d: conversion is allowed only from exact 16 bit colorspace",target_rgbtype);
-    if(target_rgbtype==0 && vi.ComponentSize()==4)
+    if ((target_rgbtype == 24 || target_rgbtype == 32)) {
+      if (vi.BitsPerComponent() != 8) {
+        needConvertFinalBitdepth = true;
+        finalBitdepth = 8;
+        target_rgbtype = (target_rgbtype == 24) ? -1 : -2; // planar rgb intermediate
+      }
+    }
+    else if ((target_rgbtype == 48 || target_rgbtype == 64)) {
+      if (vi.BitsPerComponent() != 16) {
+        needConvertFinalBitdepth = true;
+        finalBitdepth = 16;
+        target_rgbtype = (target_rgbtype == 48) ? -1 : -2; // planar rgb intermediate
+      }
+    }
+    else if(target_rgbtype==0 && vi.ComponentSize()==4)
         env->ThrowError("ConvertToRGB: conversion is allowed only from 8 or 16 bit colorspaces");
     int rgbtype_param;
     bool reallyConvert = true;
@@ -652,8 +663,21 @@ AVSValue __cdecl ConvertToRGB::Create(AVSValue args, void* user_data, IScriptEnv
       }
       break; // RGB64
     }
-    if(reallyConvert)
-      return new ConvertYUV444ToRGB(clip, getMatrix(matrix, env), rgbtype_param , env);
+    if (reallyConvert) {
+      clip = new ConvertYUV444ToRGB(clip, getMatrix(matrix, env), rgbtype_param, env);
+
+      if (needConvertFinalBitdepth) {
+        // from any planar rgb(a) -> rgb24/32/48/64
+        clip = new ConvertBits(clip, -1 /*dither_type*/, finalBitdepth /*target_bitdepth*/, true /*assume_truerange*/, true /*fulls*/, true /*fulld*/, 8 /*n/a dither_bitdepth*/, env);
+        vi = clip->GetVideoInfo();
+
+        // source here is always a 8/16bit planar RGB(A), finally it has to be converted to RGB24/32/48/64
+        const bool isRGBA = target_rgbtype == -2;
+        clip = new PlanarRGBtoPackedRGB(clip, isRGBA);
+        vi = clip->GetVideoInfo();
+      }
+      return clip;
+    }
   }
 
   if (haveOpts)
@@ -662,26 +686,44 @@ AVSValue __cdecl ConvertToRGB::Create(AVSValue args, void* user_data, IScriptEnv
   // planar RGB-like source
   if (vi.IsPlanarRGB() || vi.IsPlanarRGBA())
   {
-      if (target_rgbtype < 0) // planar to planar
-      {
-        if (vi.IsPlanarRGB()) {
-          if (target_rgbtype == -1)
-            return clip;
-          // prgb->prgba create with default alpha
-          return new AddAlphaPlane(clip, nullptr, 0.0f, false, env);
-        }
-        // planar rgba source
-        if(target_rgbtype==-2)
-           return clip;
-        return new RemoveAlphaPlane(clip, env);
+    if (target_rgbtype < 0) // planar to planar
+    {
+      if (vi.IsPlanarRGB()) {
+        if (target_rgbtype == -1)
+          return clip;
+        // prgb->prgba create with default alpha
+        return new AddAlphaPlane(clip, nullptr, 0.0f, false, env);
       }
-      if(vi.ComponentSize() == 4)
-          env->ThrowError("ConvertToRGB: conversion from float colorspace is not supported.");
-      if((target_rgbtype==24 || target_rgbtype==32) && vi.ComponentSize()!=1)
-          env->ThrowError("ConvertToRGB: conversion is allowed only from 8 bit colorspace");
-      if((target_rgbtype==48 || target_rgbtype==64) && vi.ComponentSize()!=2)
-          env->ThrowError("ConvertToRGB: conversion is allowed only from 16 bit colorspace");
-      return new PlanarRGBtoPackedRGB(clip, (target_rgbtype==32 || target_rgbtype==64));
+      // planar rgba source
+      if (target_rgbtype == -2)
+        return clip;
+      return new RemoveAlphaPlane(clip, env);
+    }
+
+    // planar to packed 24/32/48/64
+    bool needConvertFinalBitdepth = false;
+    int finalBitdepth = -1;
+
+    if (target_rgbtype == 24 || target_rgbtype == 32) {
+      if (vi.BitsPerComponent() != 8) {
+        needConvertFinalBitdepth = true;
+        finalBitdepth = 8;
+      }
+    }
+    else if (target_rgbtype == 48 || target_rgbtype == 64) {
+      if (vi.BitsPerComponent() != 16) {
+        needConvertFinalBitdepth = true;
+        finalBitdepth = 16;
+      }
+    }
+
+    if (needConvertFinalBitdepth) {
+      // from any bitdepth planar rgb(a) -> 8/16 bits
+      clip = new ConvertBits(clip, -1 /*dither_type*/, finalBitdepth /*target_bitdepth*/, true /*assume_truerange*/, true /*fulls*/, true /*fulld*/, 8 /*n/a dither_bitdepth*/, env);
+      vi = clip->GetVideoInfo();
+    }
+
+    return new PlanarRGBtoPackedRGB(clip, (target_rgbtype == 32 || target_rgbtype == 64));
   }
 
   // YUY2
@@ -957,15 +999,16 @@ static void convert_rgb_uint16_to_8_c(const BYTE *srcp, BYTE *dstp, int src_rows
   case 4: matrix = reinterpret_cast<const BYTE *>(dither4x4.data); break;
   case 6: matrix = reinterpret_cast<const BYTE *>(dither8x8.data); break;
   case 8: matrix = reinterpret_cast<const BYTE *>(dither16x16.data); break;
+  default: return; // n/a
   }
 
   for(int y=0; y<src_height; y++)
   {
-    if (dither_mode == 0)
+    if constexpr(dither_mode == 0)
       _y = (y & MASK) << DITHER_ORDER; // ordered dither
     for (int x = 0; x < src_width; x++)
     {
-      if (dither_mode < 0) // -1: no dither
+      if constexpr(dither_mode < 0) // -1: no dither
       {
         const float mulfactor = sourcebits == 16 ? (1.0f / 257.0f) :
           sourcebits == 14 ? (255.0f / 16383.0f) :
@@ -994,9 +1037,9 @@ static void convert_rgb_uint16_to_8_c(const BYTE *srcp, BYTE *dstp, int src_rows
           DITHER_BIT_DIFF == 2 ? (255.0f / 1023.0f) : // 10 bits
           1.0f;
 
-        if (TARGET_DITHER_BITDEPTH <= 4)
+        if constexpr(TARGET_DITHER_BITDEPTH <= 4)
           new_pixel = (uint16_t)((srcp0[x] + corr) * mulfactor); // rounding here makes brightness shift
-        else if (DITHER_BIT_DIFF > 0)
+        else if constexpr(DITHER_BIT_DIFF > 0)
           new_pixel = (uint16_t)((srcp0[x] + corr) * mulfactor + 0.5f);
         else
           new_pixel = (uint16_t)(srcp0[x] + corr);
@@ -1007,7 +1050,7 @@ static void convert_rgb_uint16_to_8_c(const BYTE *srcp, BYTE *dstp, int src_rows
         // for generality. Now target == 8 bit, and dither_target is also 8 bit
         // for test: source:10 bit, target=8 bit, dither_target=4 bit
         const int BITDIFF_BETWEEN_DITHER_AND_TARGET = DITHER_BIT_DIFF - (sourcebits - TARGET_BITDEPTH);
-        if(BITDIFF_BETWEEN_DITHER_AND_TARGET != 0)  // dither to 8, target to 8
+        if constexpr(BITDIFF_BETWEEN_DITHER_AND_TARGET != 0)  // dither to 8, target to 8
           new_pixel = new_pixel << BITDIFF_BETWEEN_DITHER_AND_TARGET; // if implemented non-8bit dither target, this should be fullscale
         dstp[x] = (BYTE)new_pixel;
       }
@@ -1053,6 +1096,7 @@ static void convert_rgb_uint16_to_8_sse2(const BYTE *srcp, BYTE *dstp, int src_r
   case 4: matrix = reinterpret_cast<const BYTE *>(dither4x4.data); break;
   case 6: matrix = reinterpret_cast<const BYTE *>(dither8x8.data); break;
   case 8: matrix = reinterpret_cast<const BYTE *>(dither16x16.data); break;
+  default: return; // n/a
   }
 
   // 20171024: given up integer division, rounding problems
@@ -1066,11 +1110,11 @@ static void convert_rgb_uint16_to_8_sse2(const BYTE *srcp, BYTE *dstp, int src_r
 
   for (int y = 0; y < src_height; y++)
   {
-    if (dither_mode == 0)
+    if constexpr(dither_mode == 0)
       _y = (y & MASK) << DITHER_ORDER; // ordered dither
     for (int x = 0; x < src_width; x += 8) // 8 * uint16_t at a time
     {
-      if (dither_mode < 0) // -1: no dither
+      if constexpr(dither_mode < 0) // -1: no dither
       {
 
         // C: dstp[x] = (uint8_t)(srcp0[x] * mulfactor + 0.5f);
@@ -1128,7 +1172,7 @@ static void convert_rgb_uint16_to_8_sse2(const BYTE *srcp, BYTE *dstp, int src_r
         else
         new_pixel = (uint16_t)(srcp0[x] + corr);
         */
-        if (TARGET_DITHER_BITDEPTH <= 4) {
+        if constexpr(TARGET_DITHER_BITDEPTH <= 4) {
           // round: truncate
           __m128 pixel_f_lo = _mm_cvtepi32_ps(pixel_i_lo); // 4 floats
           __m128 mulled_lo = _mm_mul_ps(pixel_f_lo, mulfactor_dith_simd);
@@ -1138,7 +1182,7 @@ static void convert_rgb_uint16_to_8_sse2(const BYTE *srcp, BYTE *dstp, int src_r
           __m128 mulled_hi = _mm_mul_ps(pixel_f_hi, mulfactor_dith_simd);
           converted32_hi = _mm_cvttps_epi32(mulled_hi); // truncate! rounding here makes brightness shift
         }
-        else if (DITHER_BIT_DIFF > 0) {
+        else if constexpr(DITHER_BIT_DIFF > 0) {
           // round: nearest
           __m128 pixel_f_lo = _mm_cvtepi32_ps(pixel_i_lo); // 4 floats
           __m128 mulled_lo = _mm_mul_ps(pixel_f_lo, mulfactor_dith_simd);
@@ -1155,14 +1199,14 @@ static void convert_rgb_uint16_to_8_sse2(const BYTE *srcp, BYTE *dstp, int src_r
         }
 
         __m128i converted_16 = _mm_packs_epi32(converted32_lo, converted32_hi);
-        if (max_pixel_value_dithered <= 16384) // when <= 14 bits. otherwise packus_epi16 handles well. min_epi16 is sse2 only unlike min_epu16
+        if constexpr(max_pixel_value_dithered <= 16384) // when <= 14 bits. otherwise packus_epi16 handles well. min_epi16 is sse2 only unlike min_epu16
           converted_16 = _mm_min_epi16(converted_16, _mm_set1_epi16(max_pixel_value_dithered)); // new_pixel = min(new_pixel, max_pixel_value_dithered); // clamp upper
 
         // scale back to the required bit depth
         // for generality. Now target == 8 bit, and dither_target is also 8 bit
         // for test: source:10 bit, target=8 bit, dither_target=4 bit
         const int BITDIFF_BETWEEN_DITHER_AND_TARGET = DITHER_BIT_DIFF - (sourcebits - TARGET_BITDEPTH);
-        if (BITDIFF_BETWEEN_DITHER_AND_TARGET != 0)  // dither to 8, target to 8
+        if constexpr(BITDIFF_BETWEEN_DITHER_AND_TARGET != 0)  // dither to 8, target to 8
           converted_16 = _mm_slli_epi16(converted_16, BITDIFF_BETWEEN_DITHER_AND_TARGET); // new_pixel << BITDIFF_BETWEEN_DITHER_AND_TARGET; // if implemented non-8bit dither target, this should be fullscale
 
         __m128i converted_8 = _mm_packus_epi16(converted_16, zero);
@@ -1236,7 +1280,6 @@ static void convert_uint_floyd_c(const BYTE *srcp8, BYTE *dstp8, int src_rowsize
   std::fill_n(error_ptr_safe, src_width + 2, 0);
 
   int *error_ptr = error_ptr_safe + 1;
-  int nextError = 0;
 
   const int INTERNAL_BITS = DITHER_BIT_DIFF < 6 ? sourcebits+8 : sourcebits; // keep accuracy
   const int SHIFTBITS_TO_INTERNAL = INTERNAL_BITS - sourcebits;
@@ -1321,14 +1364,15 @@ static void convert_uint16_to_8_c(const BYTE *srcp, BYTE *dstp, int src_rowsize,
   case 4: matrix = reinterpret_cast<const BYTE *>(dither4x4.data); break;
   case 6: matrix = reinterpret_cast<const BYTE *>(dither8x8.data); break;
   case 8: matrix = reinterpret_cast<const BYTE *>(dither16x16.data); break;
+  default: return; // n/a
   }
 
   for(int y=0; y<src_height; y++)
   {
-    if (dither_mode == 0) _y = (y & MASK) << DITHER_ORDER; // ordered dither
+    if constexpr(dither_mode == 0) _y = (y & MASK) << DITHER_ORDER; // ordered dither
     for (int x = 0; x < src_width; x++)
     {
-      if(dither_mode < 0) // -1: no dither
+      if constexpr(dither_mode < 0) // -1: no dither
         dstp[x] = srcp0[x] >> (sourcebits-TARGET_BITDEPTH); // no dithering, no range conversion, simply shift
       else { // dither_mode == 0 -> ordered dither
         int corr = matrix[_y | (x & MASK)];
@@ -1339,7 +1383,7 @@ static void convert_uint16_to_8_c(const BYTE *srcp, BYTE *dstp, int src_rowsize,
         // for generality. Now target == 8 bit, and dither_target is also 8 bit
         // for test: source:10 bit, target=8 bit, dither_target=4 bit
         const int BITDIFF_BETWEEN_DITHER_AND_TARGET = DITHER_BIT_DIFF - (sourcebits - TARGET_BITDEPTH);
-        if(BITDIFF_BETWEEN_DITHER_AND_TARGET != 0)  // dither to 8, target to 8
+        if constexpr(BITDIFF_BETWEEN_DITHER_AND_TARGET != 0)  // dither to 8, target to 8
           new_pixel = new_pixel << BITDIFF_BETWEEN_DITHER_AND_TARGET; // closest in palette: simple shift with
         dstp[x] = (BYTE)new_pixel;
       }
@@ -1438,6 +1482,7 @@ static void convert_uint16_to_8_dither_sse2(const BYTE *srcp8, BYTE *dstp, int s
     matrix = reinterpret_cast<const BYTE *>(dither16x16.data);
     matrix_c = matrix;
     break;
+  default: return; // n/a
   }
 
   const BYTE *current_matrix_line;
@@ -1462,7 +1507,7 @@ static void convert_uint16_to_8_dither_sse2(const BYTE *srcp8, BYTE *dstp, int s
 
       __m128i new_pixel_lo, new_pixel_hi;
 
-      if (sourcebits < 16) { // no overflow
+      if constexpr(sourcebits < 16) { // no overflow
         new_pixel_lo = _mm_srli_epi16(_mm_add_epi16(src_lo, corr_lo), DITHER_BIT_DIFF);
         new_pixel_hi = _mm_srli_epi16(_mm_add_epi16(src_hi, corr_hi), DITHER_BIT_DIFF);
         // scale down after adding dithering noise
@@ -1492,12 +1537,12 @@ static void convert_uint16_to_8_dither_sse2(const BYTE *srcp8, BYTE *dstp, int s
 
       __m128i new_pixel = _mm_packus_epi16(new_pixel_lo, new_pixel_hi); // 2x8 x16 bit -> 16 byte. Clamp is automatic
 
-      if (TARGET_DITHER_BITDEPTH < 8) { // generic (not used) fun option to dither 10->4 bits then back to 8 bit
+      if constexpr(TARGET_DITHER_BITDEPTH < 8) { // generic (not used) fun option to dither 10->4 bits then back to 8 bit
         new_pixel = _mm_min_epu8(new_pixel, max_pixel_value_dithered_epi8);
       }
 
       const int BITDIFF_BETWEEN_DITHER_AND_TARGET = DITHER_BIT_DIFF - (sourcebits - TARGET_BITDEPTH);
-      if (BITDIFF_BETWEEN_DITHER_AND_TARGET != 0) { //==0 when dither and target are both 8
+      if constexpr(BITDIFF_BETWEEN_DITHER_AND_TARGET != 0) { //==0 when dither and target are both 8
         // scale back, when e.g. 10 bit data is dithered down to 4,6,8 bits but the target bit depth is still 8 bit.
         new_pixel = _mm_and_si128(_mm_set1_epi8((0xFF << BITDIFF_BETWEEN_DITHER_AND_TARGET) & 0xFF), _mm_slli_epi32(new_pixel, BITDIFF_BETWEEN_DITHER_AND_TARGET));
         // non-existant _mm_slli_epi8. closest in palette: simple shift
@@ -1517,7 +1562,7 @@ static void convert_uint16_to_8_dither_sse2(const BYTE *srcp8, BYTE *dstp, int s
       // for generality. Now target == 8 bit, and dither_target is also 8 bit
       // for test: source:10 bit, target=8 bit, dither_target=4 bit
       const int BITDIFF_BETWEEN_DITHER_AND_TARGET = DITHER_BIT_DIFF - (sourcebits - TARGET_BITDEPTH);
-      if (BITDIFF_BETWEEN_DITHER_AND_TARGET != 0)  // dither to 8, target to 8
+      if constexpr(BITDIFF_BETWEEN_DITHER_AND_TARGET != 0)  // dither to 8, target to 8
         new_pixel = new_pixel << BITDIFF_BETWEEN_DITHER_AND_TARGET; // closest in palette: simple shift with
       dstp[x] = (BYTE)new_pixel;
     }
@@ -1529,7 +1574,7 @@ static void convert_uint16_to_8_dither_sse2(const BYTE *srcp8, BYTE *dstp, int s
 
 // 10-16bits: sse4.1
 // 8 bits: sse2
-template<typename pixel_t, uint8_t targetbits, bool chroma>
+template<typename pixel_t, uint8_t targetbits, bool chroma, bool fulls, bool fulld>
 void convert_32_to_uintN_sse(const BYTE *srcp8, BYTE *dstp8, int src_rowsize, int src_height, int src_pitch, int dst_pitch)
 {
   const float *srcp = reinterpret_cast<const float *>(srcp8);
@@ -1542,12 +1587,31 @@ void convert_32_to_uintN_sse(const BYTE *srcp8, BYTE *dstp8, int src_rowsize, in
 
   const int max_pixel_value = (1 << targetbits) - 1;
   const __m128i max_pixel_value_128 = _mm_set1_epi16(max_pixel_value);
-  const float half_i = (float)(1 << (targetbits - 1));
-  const __m128 half_ps = _mm_set1_ps(0.5f);
-  const __m128 halfint_plus_rounder_ps = _mm_set1_ps(half_i + 0.5f);
-  const __m128 rounder_ps = _mm_set1_ps(0.5f);
 
-  __m128 factor_ps = _mm_set1_ps((float)max_pixel_value); // 0-1.0 -> 0..max_pixel_value
+  const int limit_lo_d = (fulld ? 0 : 16) << (targetbits - 8);
+  const int limit_hi_d = fulld ? ((1 << targetbits) - 1) : ((chroma ? 240 : 235) << (targetbits - 8));
+  const float range_diff_d = (float)limit_hi_d - limit_lo_d;
+
+  const int limit_lo_s = fulls ? 0 : 16;
+  const int limit_hi_s = fulls ? 255 : (chroma ? 240 : 235);
+  const float range_diff_s = (limit_hi_s - limit_lo_s) / 255.0f;
+
+  // fulls fulld luma             luma_new   chroma                          chroma_new
+  // true  false 0..1              16-235     -0.5..0.5                      16-240       Y = Y * ((235-16) << (bpp-8)) + 16, Chroma= Chroma * ((240-16) << (bpp-8)) + 16
+  // true  true  0..1               0-255     -0.5..0.5                      0-128-255
+  // false false 16/255..235/255   16-235     (16-128)/255..(240-128)/255    16-240
+  // false true  16/255..235/255    0..1      (16-128)/255..(240-128)/255    0-128-255
+  const float factor = range_diff_d / range_diff_s;
+
+  const float half_i = (float)(1 << (targetbits - 1));
+#ifdef FLOAT_CHROMA_IS_HALF_CENTERED
+  const __m128 half_ps = _mm_set1_ps(0.5f);
+#endif
+  const __m128 halfint_plus_rounder_ps = _mm_set1_ps(half_i + 0.5f);
+  const __m128 limit_lo_s_ps = _mm_set1_ps(limit_lo_s / 255.0f);
+  const __m128 limit_lo_plus_rounder_ps = _mm_set1_ps(limit_lo_d + 0.5f);
+
+  __m128 factor_ps = _mm_set1_ps(factor); // 0-1.0 -> 0..max_pixel_value
 
   for (int y = 0; y<src_height; y++)
   {
@@ -1558,27 +1622,31 @@ void convert_32_to_uintN_sse(const BYTE *srcp8, BYTE *dstp8, int src_rowsize, in
       __m128 src_0 = _mm_load_ps(reinterpret_cast<const float *>(srcp + x));
       __m128 src_1 = _mm_load_ps(reinterpret_cast<const float *>(srcp + x + 4));
       if (chroma) {
-#ifdef FLOAT_CHROMA_IS_ZERO_CENTERED
-        //pixel = srcp0[x] * factor + half + 0.5f; // 0.5f: keep the neutral grey level of float 0.5
-#else
+#ifdef FLOAT_CHROMA_IS_HALF_CENTERED
         // shift 0.5 before, shift back half_int after. 0.5->exact half of 128/512/...
         src_0 = _mm_sub_ps(src_0, half_ps);
         src_1 = _mm_sub_ps(src_1, half_ps);
         //pixel = (srcp0[x] - 0.5f) * factor + half + 0.5f;
+#else
+        //pixel = (srcp0[x]       ) * factor + half + 0.5f;
 #endif
         src_0 = _mm_add_ps(_mm_mul_ps(src_0, factor_ps), halfint_plus_rounder_ps);
         src_1 = _mm_add_ps(_mm_mul_ps(src_1, factor_ps), halfint_plus_rounder_ps);
       }
       else {
-        src_0 = _mm_add_ps(_mm_mul_ps(src_0, factor_ps), rounder_ps);
-        src_1 = _mm_add_ps(_mm_mul_ps(src_1, factor_ps), rounder_ps);
-        // pixel = srcp0[x] * factor + 0.5f; // 0.5f: keep the neutral grey level of float 0.5
+        if constexpr(!fulls) {
+          src_0 = _mm_sub_ps(src_0, limit_lo_s_ps);
+          src_1 = _mm_sub_ps(src_1, limit_lo_s_ps);
+        }
+        src_0 = _mm_add_ps(_mm_mul_ps(src_0, factor_ps), limit_lo_plus_rounder_ps);
+        src_1 = _mm_add_ps(_mm_mul_ps(src_1, factor_ps), limit_lo_plus_rounder_ps);
+        //pixel = (srcp0[x] - limit_lo_s_ps) * factor + half + limit_lo + 0.5f;
       }
       result_0 = _mm_cvttps_epi32(src_0); // truncate
       result_1 = _mm_cvttps_epi32(src_1);
-      if (sizeof(pixel_t) == 2) {
+      if constexpr(sizeof(pixel_t) == 2) {
         result = _mm_packus_epi32(result_0, result_1); // sse41
-        if (targetbits > 8 && targetbits < 16) {
+        if constexpr(targetbits > 8 && targetbits < 16) {
           result = _mm_min_epu16(result, max_pixel_value_128); // sse41, extra clamp for 10, 12, 14 bits
         }
         _mm_store_si128(reinterpret_cast<__m128i *>(dstp + x), result);
@@ -1598,7 +1666,7 @@ void convert_32_to_uintN_sse(const BYTE *srcp8, BYTE *dstp8, int src_rowsize, in
 #endif
 
 // float to 8 bit, float to 10/12/14/16 bit
-template<typename pixel_t, uint8_t targetbits, bool chroma>
+template<typename pixel_t, uint8_t targetbits, bool chroma, bool fulls, bool fulld>
 static void convert_32_to_uintN_c(const BYTE *srcp, BYTE *dstp, int src_rowsize, int src_height, int src_pitch, int dst_pitch)
 {
   const float *srcp0 = reinterpret_cast<const float *>(srcp);
@@ -1612,7 +1680,21 @@ static void convert_32_to_uintN_c(const BYTE *srcp, BYTE *dstp, int src_rowsize,
   const float max_dst_pixelvalue = (float)((1<<targetbits) - 1); // 255, 1023, 4095, 16383, 65535.0
   const float half = (float)(1 << (targetbits - 1));
 
-  float factor = (float)max_dst_pixelvalue;
+  const int limit_lo_d = (fulld ? 0 : 16) << (targetbits - 8);
+  const int limit_hi_d = fulld ? ((1 << targetbits) - 1) : ((chroma ? 240 : 235) << (targetbits - 8));
+  const float range_diff_d = (float)limit_hi_d - limit_lo_d;
+
+  const int limit_lo_s = fulls ? 0 : 16;
+  const float limit_lo_s_ps = limit_lo_s / 255.0f;
+  const int limit_hi_s = fulls ? 255 : (chroma ? 240 : 235);
+  const float range_diff_s = (limit_hi_s - limit_lo_s) / 255.0f; 
+
+  // fulls fulld luma             luma_new   chroma                          chroma_new
+  // true  false 0..1              16-235     -0.5..0.5                      16-240       Y = Y * ((235-16) << (bpp-8)) + 16, Chroma= Chroma * ((240-16) << (bpp-8)) + 16
+  // true  true  0..1               0-255     -0.5..0.5                      0-128-255
+  // false false 16/255..235/255   16-235     (16-128)/255..(240-128)/255    16-240
+  // false true  16/255..235/255    0..1      (16-128)/255..(240-128)/255    0-128-255
+  const float factor = range_diff_d / range_diff_s;
 
   for(int y=0; y<src_height; y++)
   {
@@ -1620,15 +1702,19 @@ static void convert_32_to_uintN_c(const BYTE *srcp, BYTE *dstp, int src_rowsize,
     {
       float pixel;
       if (chroma) {
-#ifdef FLOAT_CHROMA_IS_ZERO_CENTERED
-        pixel = srcp0[x] * factor + half + 0.5f; // 0.5f: keep the neutral grey level of float 0.5
-#else
+#ifdef FLOAT_CHROMA_IS_HALF_CENTERED
         // shift 0.5 before, shift back half_int after. 0.5->exact half of 128/512/...
-        pixel = (srcp0[x] - 0.5f) * factor + half + 0.5f;
+        pixel = (srcp0[x] - 0.5f);
+#else
+        pixel = srcp0[x];
 #endif
+        pixel = pixel * factor + half + 0.5f;
       }
       else {
-        pixel = srcp0[x] * factor + 0.5f; // 0.5f: keep the neutral grey level of float 0.5
+        if constexpr(!fulls)
+          pixel = (srcp0[x] - limit_lo_s_ps) * factor + 0.5f + limit_lo_d;
+        else
+          pixel = srcp0[x] * factor + 0.5f + limit_lo_d;
       }
       dstp0[x] = pixel_t(clamp(pixel, 0.0f, max_dst_pixelvalue)); // we clamp here!
     }
@@ -1654,13 +1740,13 @@ static void convert_rgb_8_to_uint16_c(const BYTE *srcp, BYTE *dstp, int src_rows
         for (int x = 0; x < src_width; x++)
         {
             // test
-            if(targetbits==16)
+            if constexpr(targetbits==16)
                 dstp0[x] = srcp0[x] * 257; // full range 0..255 <-> 0..65535 (257 = 65535 / 255)
-            else if (targetbits==14)
+            else if constexpr(targetbits==14)
                 dstp0[x] = srcp0[x] * 16383 / 255; // full range 0..255 <-> 0..16384-1
-            else if (targetbits==12)
+            else if constexpr(targetbits==12)
                 dstp0[x] = srcp0[x] * 4095 / 255; // full range 0..255 <-> 0..4096-1
-            else if (targetbits==10)
+            else if constexpr(targetbits==10)
                 dstp0[x] = srcp0[x] * 1023 / 255; // full range 0..255 <-> 0..1024-1
         }
         dstp0 += dst_pitch;
@@ -1752,7 +1838,7 @@ static void convert_rgb_8_to_uint16_sse2(const BYTE *srcp8, BYTE *dstp8, int src
       __m128i src_lo = _mm_unpacklo_epi8(src, zero);             // 8* uint16
       __m128i src_hi = _mm_unpackhi_epi8(src, zero);             // 8* uint16
       // test
-      if(targetbits==16) {
+      if constexpr(targetbits==16) {
         // *257 mullo is faster than x*257 = (x<<8 + x) add/or solution (i7)
         __m128i res_lo = _mm_mullo_epi16(src_lo, multiplier); // lower 16 bit of multiplication is enough
         __m128i res_hi = _mm_mullo_epi16(src_hi, multiplier);
@@ -1929,7 +2015,7 @@ static void convert_rgb_uint16_to_uint16_sse2(const BYTE *srcp8, BYTE *dstp8, in
         result = _mm_packus_epi32(_mm_cvtps_epi32(result_lo), _mm_cvtps_epi32(result_hi));
       else
         result = _MM_PACKUS_EPI32(_mm_cvtps_epi32(result_lo), _mm_cvtps_epi32(result_hi));
-      if (targetbits < 16) {
+      if constexpr(targetbits < 16) {
         if(hasSSE4)
           result = _mm_min_epu16(result, max_pixel_value);
         else
@@ -2016,6 +2102,7 @@ static void convert_rgb_uint16_to_uint16_dither_c(const BYTE *srcp8, BYTE *dstp8
   case 4: matrix = reinterpret_cast<const BYTE *>(dither4x4.data); break;
   case 6: matrix = reinterpret_cast<const BYTE *>(dither8x8.data); break;
   case 8: matrix = reinterpret_cast<const BYTE *>(dither16x16.data); break;
+  default: return; // n/a
   }
 
   for (int y = 0; y < src_height; y++)
@@ -2031,7 +2118,7 @@ static void convert_rgb_uint16_to_uint16_dither_c(const BYTE *srcp8, BYTE *dstp8
       // new_pixel = min(new_pixel, max_pixel_value_dithered_i); // clamp upper
       // scale back to the required bit depth
       const int BITDIFF_BETWEEN_DITHER_AND_TARGET = DITHER_BIT_DIFF - (sourcebits - TARGET_BITDEPTH);
-      if (BITDIFF_BETWEEN_DITHER_AND_TARGET != 0) {
+      if constexpr(BITDIFF_BETWEEN_DITHER_AND_TARGET != 0) {
         new_pixel = new_pixel * max_pixel_value / max_pixel_value_dithered;
       }
       dstp[x] = (uint16_t)(min((int)new_pixel, max_pixel_value));
@@ -2107,6 +2194,7 @@ static void convert_uint16_to_uint16_dither_c(const BYTE *srcp8, BYTE *dstp8, in
   case 4: matrix = reinterpret_cast<const BYTE *>(dither4x4.data); break;
   case 6: matrix = reinterpret_cast<const BYTE *>(dither8x8.data); break;
   case 8: matrix = reinterpret_cast<const BYTE *>(dither16x16.data); break;
+  default: return; // n/a
   }
 
   for (int y = 0; y < src_height; y++)
@@ -2122,7 +2210,7 @@ static void convert_uint16_to_uint16_dither_c(const BYTE *srcp8, BYTE *dstp8, in
       // for generality. Now target == 8 bit, and dither_target is also 8 bit
       // for test: source:10 bit, target=8 bit, dither_target=4 bit
       const int BITDIFF_BETWEEN_DITHER_AND_TARGET = DITHER_BIT_DIFF - (sourcebits - TARGET_BITDEPTH);
-      if (BITDIFF_BETWEEN_DITHER_AND_TARGET != 0)  // dither to 8, target to 8
+      if constexpr(BITDIFF_BETWEEN_DITHER_AND_TARGET != 0)  // dither to 8, target to 8
         new_pixel = new_pixel << BITDIFF_BETWEEN_DITHER_AND_TARGET; // closest in palette: simple shift with
       dstp[x] = (uint16_t)new_pixel;
     }
@@ -2175,9 +2263,8 @@ static void convert_uint16_to_uint16_sse2(const BYTE *srcp8, BYTE *dstp8, int sr
   }
 }
 
-
 // 8 bit to float, 16/14/12/10 bits to float
-template<typename pixel_t, uint8_t sourcebits, bool chroma>
+template<typename pixel_t, uint8_t sourcebits, bool chroma, bool fulls, bool fulld>
 static void convert_uintN_to_float_c(const BYTE *srcp, BYTE *dstp, int src_rowsize, int src_height, int src_pitch, int dst_pitch)
 {
   const pixel_t *srcp0 = reinterpret_cast<const pixel_t *>(srcp);
@@ -2189,10 +2276,25 @@ static void convert_uintN_to_float_c(const BYTE *srcp, BYTE *dstp, int src_rowsi
   int src_width = src_rowsize / sizeof(pixel_t);
 
   const float max_src_pixelvalue = (float)((1<<sourcebits) - 1); // 255, 1023, 4095, 16383, 65535.0
-  const float factor = 1 / max_src_pixelvalue;
+
+  const int limit_lo_s = (fulls ? 0 : 16) << (sourcebits - 8);
+  const int limit_hi_s = fulls ? ((1 << sourcebits) - 1) : ((chroma ? 240 : 235) << (sourcebits - 8));
+  const float range_diff_s = (float)limit_hi_s - limit_lo_s;
+
+  const int limit_lo_d = fulld ? 0 : 16;
+  const int limit_hi_d = fulld ? 255 : (chroma ? 240 : 235);
+  const float range_diff_d = (limit_hi_d - limit_lo_d) / 255.0f;
+
+  // fulls fulld luma             luma_new   chroma                          chroma_new
+  // true  false 0..1              16-235     -0.5..0.5                      16-240       Y = Y * ((235-16) << (bpp-8)) + 16, Chroma= Chroma * ((240-16) << (bpp-8)) + 16
+  // true  true  0..1               0-255     -0.5..0.5                      0-128-255
+  // false false 16/255..235/255   16-235     (16-128)/255..(240-128)/255    16-240
+  // false true  16/255..235/255    0..1      (16-128)/255..(240-128)/255    0-128-255
+  const float factor = range_diff_d / range_diff_s;
+
   const int half = 1 << (sourcebits - 1);
 
-  // 0..255,65535 -> 0..1.0 (or -0.5..+0.5)
+  // 0..255,65535 -> 0..1.0 (or -0.5..+0.5) or less if !full
 
   for(int y=0; y<src_height; y++)
   {
@@ -2200,14 +2302,20 @@ static void convert_uintN_to_float_c(const BYTE *srcp, BYTE *dstp, int src_rowsi
     {
       float pixel;
       if (chroma) {
-#ifdef FLOAT_CHROMA_IS_ZERO_CENTERED
-        pixel = (srcp0[x] - half) * factor; // -0.5..0.5
+#ifdef FLOAT_CHROMA_IS_HALF_CENTERED
+        if (fulls)
+          pixel = srcp0[x] * factor; // 0..255->0..1
+        else
+          pixel = (srcp0[x] - half) * factor + 0.5f; // back to 0..1.0 (0.5 centered)
 #else
-        pixel = srcp0[x] * factor; // 0..1.0
+        if (fulls)
+          pixel = srcp0[x] * factor - 0.5f; // 0..1->-0.5..0.5
+        else
+          pixel = (srcp0[x] - half) * factor; // -0.5..0.5 when fulld
 #endif
       }
       else {
-        pixel = srcp0[x] * factor;
+        pixel = (srcp0[x] - limit_lo_s) * factor + limit_lo_d / 255.0f;
       }
       dstp0[x] = pixel;
     }
@@ -2728,17 +2836,37 @@ ConvertBits::ConvertBits(PClip _child, const int _dither_mode, const int _target
 
   conv_function_chroma = nullptr; // used only for 32bit float
 
-  if (fulls != fulld)
-    env->ThrowError("ConvertBits: fulls and fulld should be the same");
+  if (bits_per_pixel < 32 && target_bitdepth < 32) {
+    // 32 bit source: fulls, fulld handled properly
+    if (fulls != fulld)
+      env->ThrowError("ConvertBits: fulls and fulld should be the same for non-32bit float formats");
+  }
+
+  // 8-16bit->32bits support fulls fulld, alpha is always full-full
+#define convert_uintN_to_float_functions(uint_X_t, source_bits) \
+      conv_function_a = convert_uintN_to_float_c<uint_X_t, source_bits, false, true, true>; /* full-full */ \
+      if (fulls && fulld) { \
+        conv_function = convert_uintN_to_float_c<uint_X_t, source_bits, false, true, true>; \
+        conv_function_chroma = convert_uintN_to_float_c<uint_X_t, source_bits, true, true, true>; \
+      } \
+      else if (fulls && !fulld) { \
+        conv_function = convert_uintN_to_float_c<uint_X_t, source_bits, false, true, false>; \
+        conv_function_chroma = convert_uintN_to_float_c<uint_X_t, source_bits, true, true, false>; \
+      } \
+      else if (!fulls && fulld) { \
+        conv_function = convert_uintN_to_float_c<uint_X_t, source_bits, false, false, true>; \
+        conv_function_chroma = convert_uintN_to_float_c<uint_X_t, source_bits, true, false, true>; \
+      } \
+      else if (!fulls && !fulld) { \
+        conv_function = convert_uintN_to_float_c<uint_X_t, source_bits, false, false, false>; \
+        conv_function_chroma = convert_uintN_to_float_c<uint_X_t, source_bits, true, false, false>; \
+      }
+
   // ConvertToFloat
   if (target_bitdepth == 32) {
-    // alpha copy is always full scale
-    // conv_function_chroma if float U/V is ever goes to +/-0.5 instead of generic 0..1.0
     if (pixelsize == 1) // 8->32 bit
     {
-      conv_function = convert_uintN_to_float_c<uint8_t, 8, false>;
-      conv_function_chroma = convert_uintN_to_float_c<uint8_t, 8, true>;
-      conv_function_a = conv_function;
+      convert_uintN_to_float_functions(uint8_t, 8)
     }
     else if (pixelsize == 2) // 16->32 bit
     {
@@ -2747,33 +2875,28 @@ ConvertBits::ConvertBits(PClip _child, const int _dither_mode, const int _target
         switch (bits_per_pixel)
         {
         case 10: 
-          conv_function = convert_uintN_to_float_c<uint16_t, 10, false>;
-          conv_function_chroma = convert_uintN_to_float_c<uint16_t, 10, true>;
+          convert_uintN_to_float_functions(uint16_t, 10);
           break;
         case 12: 
-          conv_function = convert_uintN_to_float_c<uint16_t, 12, false>;
-          conv_function_chroma = convert_uintN_to_float_c<uint16_t, 12, true>;
+          convert_uintN_to_float_functions(uint16_t, 12);
           break;
         case 14: 
-          conv_function = convert_uintN_to_float_c<uint16_t, 14, false>;
-          conv_function_chroma = convert_uintN_to_float_c<uint16_t, 14, true>;
+          convert_uintN_to_float_functions(uint16_t, 14);
           break;
         case 16: 
-          conv_function = convert_uintN_to_float_c<uint16_t, 16, false>;
-          conv_function_chroma = convert_uintN_to_float_c<uint16_t, 16, true>;
+          convert_uintN_to_float_functions(uint16_t, 16);
           break;
         default: env->ThrowError("ConvertToFloat: unsupported bit depth");
         }
       }
       else {
-        conv_function = convert_uintN_to_float_c<uint16_t, 16, false>;
-        conv_function_chroma = convert_uintN_to_float_c<uint16_t, 16, true>;
+        convert_uintN_to_float_functions(uint16_t, 16);
       }
     }
     else
       env->ThrowError("ConvertToFloat: internal error 32->32 is not valid here");
 
-    conv_function_a = conv_function; // alpha is always full
+    conv_function_a = conv_function; 
 
     if (vi.NumComponents() == 1)
       vi.pixel_type = VideoInfo::CS_Y32;
@@ -2793,6 +2916,26 @@ ConvertBits::ConvertBits(PClip _child, const int _dither_mode, const int _target
     return;
   }
   // ConvertToFloat end
+
+// 32bit->8-16bits support fulls fulld
+#define convert_32_to_uintN_functions(uint_X_t, target_bits) \
+      conv_function_a = avx2 ? convert_32_to_uintN_avx2<uint_X_t, target_bits, false, true, true> : sse4 ? convert_32_to_uintN_sse<uint_X_t, target_bits, false, true, true> : convert_32_to_uintN_c<uint_X_t, target_bits, false, true, true>; /* full-full */ \
+      if (fulls && fulld) { \
+        conv_function = avx2 ? convert_32_to_uintN_avx2<uint_X_t, target_bits, false, true, true> : sse4 ? convert_32_to_uintN_sse<uint_X_t, target_bits, false, true, true> : convert_32_to_uintN_c<uint_X_t, target_bits, false, true, true>; \
+        conv_function_chroma = avx2 ? convert_32_to_uintN_avx2<uint_X_t, target_bits, true, true, true> : sse4 ? convert_32_to_uintN_sse<uint_X_t, target_bits, true, true, true> : convert_32_to_uintN_c<uint_X_t, target_bits, true, true, true>; \
+      } \
+      else if (fulls && !fulld) { \
+        conv_function = avx2 ? convert_32_to_uintN_avx2<uint_X_t, target_bits, false, true, false> : sse4 ? convert_32_to_uintN_sse<uint_X_t, target_bits, false, true, false> : convert_32_to_uintN_c<uint_X_t, target_bits, false, true, false>; \
+        conv_function_chroma = avx2 ? convert_32_to_uintN_avx2<uint_X_t, target_bits, true, true, false> : sse4 ? convert_32_to_uintN_sse<uint_X_t, target_bits, true, true, false> : convert_32_to_uintN_c<uint_X_t, target_bits, true, true, false>; \
+      } \
+      else if (!fulls && fulld) { \
+        conv_function = avx2 ? convert_32_to_uintN_avx2<uint_X_t, target_bits, false, false, true> : sse4 ? convert_32_to_uintN_sse<uint_X_t, target_bits, false, false, true> : convert_32_to_uintN_c<uint_X_t, target_bits, false, false, true>; \
+        conv_function_chroma = avx2 ? convert_32_to_uintN_avx2<uint_X_t, target_bits, true, false, true> : sse4 ? convert_32_to_uintN_sse<uint_X_t, target_bits, true, false, true> : convert_32_to_uintN_c<uint_X_t, target_bits, true, false, true>; \
+      } \
+      else if (!fulls && !fulld) { \
+        conv_function = avx2 ? convert_32_to_uintN_avx2<uint_X_t, target_bits, false, false, false> : sse4 ? convert_32_to_uintN_sse<uint_X_t, target_bits, false, false, false> : convert_32_to_uintN_c<uint_X_t, target_bits, false, false, false>; \
+        conv_function_chroma = avx2 ? convert_32_to_uintN_avx2<uint_X_t, target_bits, true, false, false> : sse4 ? convert_32_to_uintN_sse<uint_X_t, target_bits, true, false, false> : convert_32_to_uintN_c<uint_X_t, target_bits, true, false, false>; \
+      }
 
   // ConvertTo16bit() (10, 12, 14, 16)
   // Conversion to uint16_t targets
@@ -2974,35 +3117,28 @@ ConvertBits::ConvertBits(PClip _child, const int _dither_mode, const int _target
         format_change_only = true;
       }
     }
-    else if (pixelsize == 4) // 32->16 bit
+    else if (pixelsize == 4) // 32->10-16 bit
     {
-      // always from full scale
       if (truerange) {
         switch (target_bitdepth)
         {
-        case 10: 
-          conv_function = avx2 ? convert_32_to_uintN_avx2<uint16_t, 10, false> : sse4 ? convert_32_to_uintN_sse<uint16_t, 10, false> : convert_32_to_uintN_c<uint16_t, 10, false>; 
-          conv_function_chroma = avx2 ? convert_32_to_uintN_avx2<uint16_t, 10, true> : sse4 ? convert_32_to_uintN_sse<uint16_t, 10, true> : convert_32_to_uintN_c<uint16_t, 10, true>;
+        case 10:
+          convert_32_to_uintN_functions(uint16_t, 10); // all variations of fulls fulld
           break;
         case 12: 
-          conv_function = avx2 ? convert_32_to_uintN_avx2<uint16_t, 12, false> : sse4 ? convert_32_to_uintN_sse<uint16_t, 12, false> : convert_32_to_uintN_c<uint16_t, 12, false>; 
-          conv_function_chroma = avx2 ? convert_32_to_uintN_avx2<uint16_t, 12, true> : sse4 ? convert_32_to_uintN_sse<uint16_t, 12, true> : convert_32_to_uintN_c<uint16_t, 12, true>;
+          convert_32_to_uintN_functions(uint16_t, 12);
           break;
         case 14: 
-          conv_function = avx2 ? convert_32_to_uintN_avx2<uint16_t, 14, false> : sse4 ? convert_32_to_uintN_sse<uint16_t, 14, false> : convert_32_to_uintN_c<uint16_t, 14, false>; 
-          conv_function_chroma = avx2 ? convert_32_to_uintN_avx2<uint16_t, 14, true> : sse4 ? convert_32_to_uintN_sse<uint16_t, 14, true> : convert_32_to_uintN_c<uint16_t, 14, true>;
+          convert_32_to_uintN_functions(uint16_t, 14);
           break;
         case 16: 
-          conv_function = avx2 ? convert_32_to_uintN_avx2<uint16_t, 16, false> : sse4 ? convert_32_to_uintN_sse<uint16_t, 16, false> : convert_32_to_uintN_c<uint16_t, 16, false>; 
-          conv_function_chroma = avx2 ? convert_32_to_uintN_avx2<uint16_t, 16, true> : sse4 ? convert_32_to_uintN_sse<uint16_t, 16, true> : convert_32_to_uintN_c<uint16_t, 16, true>;
+          convert_32_to_uintN_functions(uint16_t, 16);
           break;
         }
       }
       else {
-        conv_function = avx2 ? convert_32_to_uintN_avx2<uint16_t, 16, false> : sse4 ? convert_32_to_uintN_sse<uint16_t, 16, false> : convert_32_to_uintN_c<uint16_t, 16, false>;
-        conv_function_chroma = avx2 ? convert_32_to_uintN_avx2<uint16_t, 16, true> : sse4 ? convert_32_to_uintN_sse<uint16_t, 16, true> : convert_32_to_uintN_c<uint16_t, 16, true>;
+        convert_32_to_uintN_functions(uint16_t, 16);
       }
-      conv_function_a = conv_function;
     }
     else {
       env->ThrowError("ConvertTo16bit: unsupported bit depth");
@@ -3083,10 +3219,7 @@ ConvertBits::ConvertBits(PClip _child, const int _dither_mode, const int _target
     }
     else if (vi.ComponentSize() == 4) // 32->8 bit, no dithering option atm
     {
-      // full scale
-      conv_function = avx2 ? convert_32_to_uintN_avx2<uint8_t, 8, false> : sse2 ? convert_32_to_uintN_sse<uint8_t, 8, false> : convert_32_to_uintN_c<uint8_t, 8, false>;
-      conv_function_chroma = avx2 ? convert_32_to_uintN_avx2<uint8_t, 8, true> : sse2 ? convert_32_to_uintN_sse<uint8_t, 8, true> : convert_32_to_uintN_c<uint8_t, 8, true>;
-      conv_function_a = conv_function;
+      convert_32_to_uintN_functions(uint8_t, 8); // all combinations of fulls, fulld
     }
     else
       env->ThrowError("ConvertTo8bit: unsupported bit depth");
@@ -3137,7 +3270,6 @@ AVSValue __cdecl ConvertBits::Create(AVSValue args, void* user_data, IScriptEnvi
 
   int target_bitdepth = args[1].AsInt(create_param); // default comes by calling from old To8,To16,ToFloat functions
   int source_bitdepth = vi.BitsPerComponent();
-  int pixelsize = vi.ComponentSize();
   int dither_bitdepth = args[4].AsInt(target_bitdepth);
 
   if(target_bitdepth!=8 && target_bitdepth!=10 && target_bitdepth!=12 && target_bitdepth!=14 && target_bitdepth!=16 && target_bitdepth!=32)
@@ -3156,14 +3288,14 @@ AVSValue __cdecl ConvertBits::Create(AVSValue args, void* user_data, IScriptEnvi
   }
 
   // override defaults, e.g. set full range for greyscale clip conversion that is RGB
-  // full range is default also for float (and cannot be set to false)
-  bool fulls = args[5].AsBool(vi.IsRGB() || ((target_bitdepth == 32 || source_bitdepth == 32)));
+  // Post 2664: can be set. Full range is default also for float (and cannot be set to false)
+  bool fulls = args[5].AsBool(vi.IsRGB()/* || ((target_bitdepth == 32 || source_bitdepth == 32))*/);
   bool fulld = args[6].AsBool(fulls);
 
   int dither_type = args[3].AsInt(-1);
   bool dither_defined = args[3].Defined();
   if(dither_defined && dither_type != 1 && dither_type != 0 && dither_type != -1)
-    env->ThrowError("ConvertBits: invalid dither type parameter. Only -1 (disabled), 0 (ordered dither) or 1 (Floys-S) is allowed");
+    env->ThrowError("ConvertBits: invalid dither type parameter. Only -1 (disabled), 0 (ordered dither) or 1 (Floyd-S) is allowed");
 
   if (dither_type >= 0) {
     if (source_bitdepth < target_bitdepth)
@@ -3242,11 +3374,8 @@ AVSValue __cdecl ConvertBits::Create(AVSValue args, void* user_data, IScriptEnvi
     // source_16_bit.ConvertTo16bit(bits=10, truerange=true)  : downscale range
     // source_16_bit.ConvertTo16bit(bits=10, truerange=false) : leaves data, only format conversion
 
-  if (fulls != fulld)
-    env->ThrowError("ConvertBits: fulls and fulld has to be the same at the moment");
-
-  if ((!fulls || !fulld) && (target_bitdepth == 32 || source_bitdepth == 32))
-    env->ThrowError("ConvertBits: fulls and fulld is always true for float");
+  if (fulls != fulld && target_bitdepth != 32 && source_bitdepth != 32)
+    env->ThrowError("ConvertBits: fulls must be the same as fulld for non 32bit target and source");
 
   return new ConvertBits(clip, dither_type, target_bitdepth, assume_truerange, fulls, fulld, dither_bitdepth, env);
 }
@@ -3285,7 +3414,7 @@ PVideoFrame __stdcall ConvertBits::GetFrame(int n, IScriptEnvironment* env) {
         if (chroma && conv_function_chroma != nullptr)
           // 32bit float needs separate conversion (possible chroma -0.5 .. 0.5 option)
           // until then the conv_function_ch behaves the same as conv_function
-          // see #ifdef FLOAT_CHROMA_IS_ZERO_CENTERED
+          // see #ifdef FLOAT_CHROMA_IS_HALF_CENTERED
           conv_function_chroma(src->GetReadPtr(plane), dst->GetWritePtr(plane),
             src->GetRowSize(plane), src->GetHeight(plane),
             src->GetPitch(plane), dst->GetPitch(plane));
