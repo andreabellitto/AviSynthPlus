@@ -44,6 +44,10 @@
 #include <stdint.h>
 #include <type_traits>
 
+#if _MSC_VER <= 1900
+#define constexpr(expr) (expr)
+#endif
+
 
 /*******************************
  ********* Masked Blend ********

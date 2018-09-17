@@ -37,6 +37,10 @@
 #include <tmmintrin.h>
 #include <avs/alignment.h>
 
+#if _MSC_VER <= 1900
+#define constexpr(expr) (expr)
+#endif
+
 
 /*************************************
  *******   RGB Helper Classes   ******

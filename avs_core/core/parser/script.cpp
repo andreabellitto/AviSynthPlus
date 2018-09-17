@@ -375,8 +375,8 @@ CWDChanger::~CWDChanger(void)
 DllDirChanger::DllDirChanger(const char* new_dir)
 {
   DWORD len = GetDllDirectory (0, NULL);
-  old_directory = new char[len + 1];
-  DWORD save_success = GetDllDirectory (len, old_directory);
+  old_directory = std::unique_ptr<char[]>(new char[len + 1]);
+  DWORD save_success = GetDllDirectory (len, old_directory.get());
   BOOL set_success = SetDllDirectory(new_dir);
   restore = (save_success && set_success);
 }

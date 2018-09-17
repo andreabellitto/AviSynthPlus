@@ -48,6 +48,10 @@
 #define AVS_COPYRIGHT "\n(c) 2000-2015 Ben Rudiak-Gould, et al.\nhttp://avisynth.nl\n(c) 2013-2016 AviSynth+ Project\nhttp://avs-plus.net"
 #define BUILTIN_FUNC_PREFIX "AviSynth"
 
+#if _MSC_VER <= 1900
+#define constexpr(expr) (expr)
+#endif
+
 enum MANAGE_CACHE_KEYS
 {
   MC_RegisterCache     = (int)0xFFFF0004,

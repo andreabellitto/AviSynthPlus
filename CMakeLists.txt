@@ -22,9 +22,9 @@ IF( MSVC_IDE )  # Check for Visual Studio
   #1900      = VS 14.0 (v140 toolset)
   #1910-1919 = VS 15.0 (v141 toolset)
 
-  IF( MSVC_VERSION VERSION_LESS 1910 )
-    MESSAGE(FATAL_ERROR "Visual C++ 2017 or newer required.")
-  ENDIF()
+  #IF( MSVC_VERSION VERSION_LESS 1910 )
+  #  MESSAGE(FATAL_ERROR "Visual C++ 2017 or newer required.")
+  #ENDIF()
 
   file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/Output/plugins")
   file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/Output/system")
