@@ -645,7 +645,8 @@ public:
   PVideoFrame NewVideoFrameOnDevice(int row_size, int height, int align, Device* device);
   PVideoFrame NewVideoFrame(const VideoInfo& vi, const PDevice& device);
   PVideoFrame NewPlanarVideoFrame(int row_size, int height, int row_sizeUV, int heightUV, int align, bool U_first, Device* device);
-  bool MakeWritable(PVideoFrame* pvf);
+	bool MakeWritable(PVideoFrame* pvf);
+	bool MakePropertyWritable(PVideoFrame* pvf);
   void BitBlt(BYTE* dstp, int dst_pitch, const BYTE* srcp, int src_pitch, int row_size, int height);
   void AtExit(IScriptEnvironment::ShutdownFunc function, void* user_data);
   PVideoFrame Subframe(PVideoFrame src, int rel_offset, int new_pitch, int new_row_size, int new_height);
@@ -1663,6 +1664,11 @@ public:
     }
     core->UpdateFunctionExports(funcName, funcParams, exportVar);
   }
+
+	bool __stdcall MakePropertyWritable(PVideoFrame* pvf)
+	{
+		return core->MakePropertyWritable(pvf);
+	}
 
   InternalEnvironment* __stdcall NewThreadScriptEnvironment(int thread_id)
   {
@@ -3071,6 +3077,35 @@ bool ScriptEnvironment::MakeWritable(PVideoFrame* pvf) {
 
   *pvf = dst;
   return true;
+}
+
+bool ScriptEnvironment::MakePropertyWritable(PVideoFrame* pvf) {
+	const PVideoFrame& vf = *pvf;
+
+	// If the frame is already writable, do nothing.
+	if (vf->IsPropertyWritable())
+		return false;
+
+	// Otherwise, allocate a new frame (using Subframe)
+	PVideoFrame dst;
+	if (vf->GetPitch(PLANAR_A)) {
+		// planar + alpha
+		dst = vf->Subframe(0, vf->GetPitch(), vf->GetRowSize(), vf->GetHeight(), 0, 0, vf->GetPitch(PLANAR_U), 0);
+	}
+	else if (vf->GetPitch(PLANAR_U)) {
+		// planar
+		dst = vf->Subframe(0, vf->GetPitch(), vf->GetRowSize(), vf->GetHeight(), 0, 0, vf->GetPitch(PLANAR_U));
+	}
+	else {
+		// single plane
+		dst = vf->Subframe(0, vf->GetPitch(), vf->GetRowSize(), vf->GetHeight());
+	}
+
+	// Copy properties
+	dst->avsmap->data = vf->avsmap->data;
+
+	*pvf = dst;
+	return true;
 }
 
 

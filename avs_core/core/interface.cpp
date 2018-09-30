@@ -551,6 +551,10 @@ bool VideoFrame::IsWritable() const {
   return false;
 }
 
+bool VideoFrame::IsPropertyWritable() const {
+	return (refcount == 1);
+}
+
 BYTE* VideoFrame::GetWritePtr(int plane) const {
   if (!plane || plane == PLANAR_Y || plane == PLANAR_G) { // planar RGB order GBR
     if (vfb->GetRefcount()>1) {
@@ -563,6 +567,10 @@ BYTE* VideoFrame::GetWritePtr(int plane) const {
 }
 
 void VideoFrame::SetProperty(const char* key, const AVSMapValue& value) {
+
+	if (refcount > 1) {
+		throw AvisynthError("Property Write Error - refcount was more than one");
+	}
 
   if (value.IsFrame()) {
     const AVSMap *childmap = value.GetFrame()->avsmap;
@@ -1400,6 +1408,8 @@ static const AVS_Linkage avs_linkage = {    // struct AVS_Linkage {
   &PDevice::GetIndex,
   &PDevice::GetName,
   // end class PDevice
+
+	&VideoFrame::IsPropertyWritable,
 
 // this part should be identical with struct AVS_Linkage in avisynth.h
 
