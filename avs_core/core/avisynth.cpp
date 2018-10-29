@@ -384,8 +384,8 @@ VideoFrame* VideoFrame::Subframe(int rel_offset, int new_pitch, int new_row_size
 VideoFrameBuffer::VideoFrameBuffer() : refcount(1), data(NULL), data_size(0), sequence_number(0) {}
 
 
-VideoFrameBuffer::VideoFrameBuffer(int size, Device* device) :
-  data(device->Allocate(size)),
+VideoFrameBuffer::VideoFrameBuffer(int size, int margin, Device* device) :
+  data(device->Allocate(size, margin)),
   data_size(size),
   sequence_number(0),
   refcount(0),
@@ -779,8 +779,8 @@ private:
       : VideoFrameBuffer(),
       free_count(0)
     { }
-    VFBStorage(int size, Device* device)
-      : VideoFrameBuffer(size, device),
+    VFBStorage(int size, int margin, Device* device)
+      : VideoFrameBuffer(size, margin, device),
       free_count(0)
     { }
     void Attach(FilterGraphNode* node) {
@@ -814,11 +814,14 @@ private:
   std::unique_ptr<DeviceManager> Devices;
   CacheRegistryType CacheRegistry;
   Cache* FrontCache;
-  VideoFrame* GetNewFrame(size_t vfb_size, Device* device);
+  VideoFrame* GetNewFrame(size_t vfb_size, size_t margin, Device* device);
   VideoFrame* GetFrameFromRegistry(size_t vfb_size, Device* device);
   void ShrinkCache(Device* device);
-  VideoFrame* AllocateFrame(size_t vfb_size, Device* device);
+  VideoFrame* AllocateFrame(size_t vfb_size, size_t margin, Device* device);
   std::recursive_mutex memory_mutex;
+
+	int frame_align;
+	int plane_align;
 
   //BufferPool BufferPool;
 
@@ -1752,6 +1755,15 @@ ScriptEnvironment::ScriptEnvironment()
     threadEnv = std::unique_ptr<ThreadScriptEnvironment>(new ThreadScriptEnvironment(0, this, nullptr));
     Devices = std::unique_ptr<DeviceManager>(new DeviceManager(threadEnv.get()));
 
+		// calc frame align
+		frame_align = plane_align = FRAME_ALIGN;
+		for (int i = 0, end = Devices->GetNumDevices(DEV_TYPE_CUDA); i < end; ++i) {
+			int align, pitchAlign;
+			Devices->GetDevice(DEV_TYPE_CUDA, i)->GetAlignmentRequirement(&align, &pitchAlign);
+			frame_align = max(frame_align, pitchAlign);
+			plane_align = max(plane_align, align);
+		}
+
     // If it was already init'd then decrement
     // the use count and leave it alone!
     if (hrfromcoinit == S_FALSE) {
@@ -2237,7 +2249,9 @@ size_t  ScriptEnvironment::GetProperty(AvsEnvProperty prop)
   case AEP_NUM_DEVICES:
     return Devices->GetNumDevices();
   case AEP_FRAME_ALIGN:
-    return FRAME_ALIGN;
+    return frame_align;
+	case AEP_PLANE_ALIGN:
+		return plane_align;
   case AEP_FILTERCHAIN_THREADS:
     return nMaxFilterInstances;
   case AEP_PHYSICAL_CPUS:
@@ -2316,7 +2330,7 @@ void ScriptEnvironment::AddFunction(const char* name, const char* params, ApplyF
   plugin_manager->AddFunction(name, params, apply, user_data, exportVar);
 }
 
-VideoFrame* ScriptEnvironment::AllocateFrame(size_t vfb_size, Device* device)
+VideoFrame* ScriptEnvironment::AllocateFrame(size_t vfb_size, size_t margin, Device* device)
 {
   if (vfb_size > (size_t)std::numeric_limits<int>::max())
   {
@@ -2326,7 +2340,7 @@ VideoFrame* ScriptEnvironment::AllocateFrame(size_t vfb_size, Device* device)
   VFBStorage* vfb = NULL;
   try
   {
-    vfb = new VFBStorage((int)vfb_size, device);
+    vfb = new VFBStorage((int)vfb_size, margin, device);
   }
   catch(const std::bad_alloc&)
   {
@@ -2552,7 +2566,7 @@ VideoFrame* ScriptEnvironment::GetFrameFromRegistry(size_t vfb_size, Device* dev
   return NULL;
 }
 
-VideoFrame* ScriptEnvironment::GetNewFrame(size_t vfb_size, Device* device)
+VideoFrame* ScriptEnvironment::GetNewFrame(size_t vfb_size, size_t margin, Device* device)
 {
   std::unique_lock<std::recursive_mutex> env_lock(memory_mutex);
 #ifdef DEBUG_GSCRIPTCLIP_MT
@@ -2581,7 +2595,7 @@ VideoFrame* ScriptEnvironment::GetNewFrame(size_t vfb_size, Device* device)
    */
    // We reserve 15% for unaccounted stuff
   if (device->memory_used + vfb_size < device->memory_max * 0.85f) {
-    frame = AllocateFrame(vfb_size, device);
+    frame = AllocateFrame(vfb_size, margin, device);
   }
   if ( frame != NULL)
     return frame;
@@ -2624,7 +2638,7 @@ VideoFrame* ScriptEnvironment::GetNewFrame(size_t vfb_size, Device* device)
   *   Try to allocate again
   * -----------------------------------------------------------
   */
-  frame = AllocateFrame(vfb_size, device);
+  frame = AllocateFrame(vfb_size, margin, device);
   if (frame != NULL)
     return frame;
 
@@ -2679,7 +2693,7 @@ VideoFrame* ScriptEnvironment::GetNewFrame(size_t vfb_size, Device* device)
    *   Try to allocate again
    * -----------------------------------------------------------
    */
-  frame = AllocateFrame(vfb_size, device);
+  frame = AllocateFrame(vfb_size, margin, device);
   if ( frame != NULL)
     return frame;
 
@@ -2827,7 +2841,7 @@ PVideoFrame ScriptEnvironment::NewPlanarVideoFrame(int row_size, int height, int
     OneTimeLogTicket ticket(LOGTICKET_W1009);
     LogMsgOnce(ticket, LOGLEVEL_WARNING, "A filter is using forced frame alignment, a feature that is deprecated and disabled. The filter will likely behave erroneously.");
   }
-  align = max(align, FRAME_ALIGN);
+  align = max(align, frame_align);
 
   int pitchUV;
   const int pitchY = AlignNumber(row_size, align);
@@ -2840,23 +2854,22 @@ PVideoFrame ScriptEnvironment::NewPlanarVideoFrame(int row_size, int height, int
     pitchUV = AlignNumber(row_sizeUV, align);
   }
 
-  size_t size = pitchY * height + 2 * pitchUV * heightUV + (alpha ? pitchY * height : 0);
+	size_t sizeY = AlignNumber(pitchY * height, plane_align);
+	size_t sizeUV = AlignNumber(pitchUV * heightUV, plane_align);
+  size_t size = sizeY + 2 * sizeUV + (alpha ? sizeY : 0);
 
-  // make space for alignment
-  size = size + align -1;
-
-  VideoFrame *res = GetNewFrame(size, device);
+  VideoFrame *res = GetNewFrame(size, align - 1, device);
 
   int  offsetU, offsetV, offsetA;
   const int offsetY = (int)(AlignPointer(res->vfb->GetWritePtr(), align) - res->vfb->GetWritePtr()); // first line offset for proper alignment
   if (U_first) {
-    offsetU = offsetY + pitchY * height;
-    offsetV = offsetY + pitchY * height + pitchUV * heightUV;
-    offsetA = alpha ? offsetV + pitchUV * heightUV : 0;
+    offsetU = offsetY + sizeY;
+    offsetV = offsetY + sizeY + sizeUV;
+    offsetA = alpha ? offsetV + sizeUV : 0;
   } else {
-    offsetV = offsetY + pitchY * height;
-    offsetU = offsetY + pitchY * height + pitchUV * heightUV;
-    offsetA = alpha ? offsetU + pitchUV * heightUV : 0;
+    offsetV = offsetY + sizeY;
+    offsetU = offsetY + sizeY + sizeUV;
+    offsetA = alpha ? offsetU + sizeUV : 0;
   }
 
   res->offset = offsetY;
@@ -2886,15 +2899,12 @@ PVideoFrame ScriptEnvironment::NewVideoFrameOnDevice(int row_size, int height, i
     OneTimeLogTicket ticket(LOGTICKET_W1009);
     this->LogMsgOnce(ticket, LOGLEVEL_WARNING, "A filter is using forced frame alignment, a feature that is deprecated and disabled. The filter will likely behave erroneously.");
   }
-  align = max(align, FRAME_ALIGN);
+  align = max(align, frame_align);
 
   const int pitch = AlignNumber(row_size, align);
   size_t size = pitch * height;
 
-  // make space for alignment
-  size = size + align -1;
-
-  VideoFrame *res = GetNewFrame(size, device);
+  VideoFrame *res = GetNewFrame(size, align - 1, device);
 
   const int offset = (int)(AlignPointer(res->vfb->GetWritePtr(), align) - res->vfb->GetWritePtr()); // first line offset for proper alignment
 
@@ -2917,7 +2927,7 @@ PVideoFrame ScriptEnvironment::NewVideoFrameOnDevice(int row_size, int height, i
 }
 
 PVideoFrame ScriptEnvironment::NewVideoFrame(const VideoInfo& vi, const PDevice& device) {
-  return NewVideoFrameOnDevice(vi, FRAME_ALIGN, (Device*)(void*)device);
+  return NewVideoFrameOnDevice(vi, frame_align, (Device*)(void*)device);
 }
 
 PVideoFrame ScriptEnvironment::NewVideoFrameOnDevice(const VideoInfo& vi, int align, Device* device) {
@@ -3055,10 +3065,10 @@ bool ScriptEnvironment::MakeWritable(PVideoFrame* pvf) {
     if (vf->GetPitch(PLANAR_U)) {  // we have no videoinfo, so we assume that it is Planar if it has a U plane.
       const int row_sizeUV = vf->GetRowSize(PLANAR_U); // for Planar RGB this returns row_sizeUV which is the same for all planes
       const int heightUV = vf->GetHeight(PLANAR_U);
-      dst = NewPlanarVideoFrame(row_size, height, row_sizeUV, heightUV, FRAME_ALIGN, false, alpha, device);  // Always V first on internal images
+      dst = NewPlanarVideoFrame(row_size, height, row_sizeUV, heightUV, frame_align, false, alpha, device);  // Always V first on internal images
     }
     else {
-      dst = NewVideoFrameOnDevice(row_size, height, FRAME_ALIGN, device);
+      dst = NewVideoFrameOnDevice(row_size, height, frame_align, device);
     }
 
     BitBlt(dst->GetWritePtr(), dst->GetPitch(), vf->GetReadPtr(), vf->GetPitch(), row_size, height);
@@ -3116,7 +3126,7 @@ void ScriptEnvironment::AtExit(IScriptEnvironment::ShutdownFunc function, void* 
 PVideoFrame ScriptEnvironment::Subframe(PVideoFrame src, int rel_offset, int new_pitch, int new_row_size, int new_height) {
 
   if (src->GetFrameBuffer()->device->device_type == DEV_TYPE_CPU)
-    if ((new_pitch | rel_offset) & (FRAME_ALIGN - 1))
+    if ((new_pitch | rel_offset) & (frame_align - 1))
       ThrowError("Filter Error: Filter attempted to break alignment of VideoFrame.");
 
   VideoFrame* subframe;
@@ -3140,7 +3150,7 @@ PVideoFrame ScriptEnvironment::Subframe(PVideoFrame src, int rel_offset, int new
 PVideoFrame ScriptEnvironment::SubframePlanar(PVideoFrame src, int rel_offset, int new_pitch, int new_row_size,
                                                         int new_height, int rel_offsetU, int rel_offsetV, int new_pitchUV) {
   if(src->GetFrameBuffer()->device->device_type == DEV_TYPE_CPU)
-    if ((rel_offset | new_pitch | rel_offsetU | rel_offsetV | new_pitchUV) & (FRAME_ALIGN - 1))
+    if ((rel_offset | new_pitch | rel_offsetU | rel_offsetV | new_pitchUV) & (frame_align - 1))
       ThrowError("Filter Error: Filter attempted to break alignment of VideoFrame.");
 
   VideoFrame *subframe = src->Subframe(rel_offset, new_pitch, new_row_size, new_height, rel_offsetU, rel_offsetV, new_pitchUV);
@@ -3163,7 +3173,7 @@ PVideoFrame ScriptEnvironment::SubframePlanar(PVideoFrame src, int rel_offset, i
 PVideoFrame ScriptEnvironment::SubframePlanar(PVideoFrame src, int rel_offset, int new_pitch, int new_row_size,
   int new_height, int rel_offsetU, int rel_offsetV, int new_pitchUV, int rel_offsetA) {
   if (src->GetFrameBuffer()->device->device_type == DEV_TYPE_CPU)
-    if ((rel_offset | new_pitch | rel_offsetU | rel_offsetV | new_pitchUV | rel_offsetA) & (FRAME_ALIGN - 1))
+    if ((rel_offset | new_pitch | rel_offsetU | rel_offsetV | new_pitchUV | rel_offsetA) & (frame_align - 1))
       ThrowError("Filter Error: Filter attempted to break alignment of VideoFrame.");
   VideoFrame* subframe;
   subframe = src->Subframe(rel_offset, new_pitch, new_row_size, new_height, rel_offsetU, rel_offsetV, new_pitchUV, rel_offsetA);
@@ -3954,11 +3964,11 @@ PVideoFrame ScriptEnvironment::GetOnDeviceFrame(const PVideoFrame& src, Device* 
   size_t srchead = GetFrameHead(src);
 
   // make space for alignment
-  size_t size = GetFrameTail(src) - srchead + FRAME_ALIGN - 1;
+  size_t size = GetFrameTail(src) - srchead;
 
-  VideoFrame *res = GetNewFrame(size, device);
+  VideoFrame *res = GetNewFrame(size, frame_align - 1, device);
 
-  const diff_t offset = (diff_t)(AlignPointer(res->vfb->GetWritePtr(), FRAME_ALIGN) - res->vfb->GetWritePtr()); // first line offset for proper alignment
+  const diff_t offset = (diff_t)(AlignPointer(res->vfb->GetWritePtr(), frame_align) - res->vfb->GetWritePtr()); // first line offset for proper alignment
   const diff_t diff = offset - (diff_t)srchead;
 
   res->offset = src->offset + diff;

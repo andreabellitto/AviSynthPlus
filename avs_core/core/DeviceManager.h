@@ -40,7 +40,7 @@ public:
     virtual ~Device() { }
 
     virtual int SetMemoryMax(int mem) = 0;
-    virtual BYTE* Allocate(size_t sz) = 0;
+    virtual BYTE* Allocate(size_t sz, int margin) = 0;
     virtual void Free(BYTE* ptr) = 0;
     virtual const char* GetName() const = 0;
     virtual void AddCompleteCallback(DeviceCompleteCallbackData cbdata) = 0;
@@ -48,6 +48,7 @@ public:
     virtual void SetActiveToCurrentThread(InternalEnvironment* env) = 0;
     virtual void* GetComputeStream() = 0;
     virtual void SetDeviceOpt(DeviceOpt opt, int val, InternalEnvironment* env) = 0;
+		virtual void GetAlignmentRequirement(int* memoryAlignment, int* pitchAlignment) = 0;
 };
 
 class DeviceManager {
@@ -65,7 +66,8 @@ public:
 
     Device* GetCPUDevice() { return GetDevice(DEV_TYPE_CPU, 0); }
 
-    int GetNumDevices() const { return numDevices; }
+		int GetNumDevices() const { return numDevices; }
+		int GetNumDevices(AvsDeviceType device_type) const;
 
     void SetDeviceOpt(DeviceOpt opt, int val, InternalEnvironment* env);
 };

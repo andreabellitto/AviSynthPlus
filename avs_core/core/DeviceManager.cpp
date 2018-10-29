@@ -148,8 +148,9 @@ public:
     return 0;
   }
 
-  virtual BYTE* Allocate(size_t size)
+  virtual BYTE* Allocate(size_t size, int margin)
   {
+		size += margin;
 #ifdef _DEBUG
     BYTE* data = new BYTE[size + 16];
     int *pInt = (int *)(data + size);
@@ -209,6 +210,12 @@ public:
   {
     // do nothing
   }
+
+	virtual void GetAlignmentRequirement(int* memoryAlignment, int* pitchAlignment)
+	{
+		*memoryAlignment = FRAME_ALIGN;
+		*pitchAlignment = FRAME_ALIGN;
+	}
 };
 
 #ifdef ENABLE_CUDA
@@ -224,11 +231,11 @@ public:
     , enable_pinned()
   { }
 
-  virtual BYTE* Allocate(size_t size)
+  virtual BYTE* Allocate(size_t size, int margin)
   {
     allocated = true;
     if (!enable_pinned) {
-      return CPUDevice::Allocate(size);
+      return CPUDevice::Allocate(size, margin);
     }
     //unsigned int flags = (prop.canMapHostMemory && prop.unifiedAddressing)
     //  ? cudaHostAllocMapped : cudaHostAllocDefault;
@@ -257,7 +264,7 @@ public:
       pByte[4] = filler[4];
     }
 #else
-    CUDA_CHECK(cudaHostAlloc((void**)&data, size + 16, flags));
+    CUDA_CHECK(cudaHostAlloc((void**)&data, size + margin + 16, flags));
 #endif
     return data;
   }
@@ -290,6 +297,12 @@ public:
       free_thresh = val;
     }
   }
+
+	virtual void GetAlignmentRequirement(int* memoryAlignment, int* pitchAlignment)
+	{
+		*memoryAlignment = FRAME_ALIGN;
+		*pitchAlignment = FRAME_ALIGN;
+	}
 };
 #endif
 
@@ -318,6 +331,8 @@ class CUDADevice : public Device {
 
   char name[32];
 
+	cudaDeviceProp prop;
+
   std::mutex mutex;
   std::vector<DeviceCompleteCallbackData> callbacks;
 
@@ -331,6 +346,8 @@ public:
     Device(DEV_TYPE_CUDA, id, n, env)
   {
     sprintf_s(name, "CUDA %d", n);
+
+		CUDA_CHECK(cudaGetDeviceProperties(&prop, device_index));
 
     SetMemoryMax(768); // start with 768MB
 #if ENABLE_CUDA_COMPUTE_STREAM
@@ -351,15 +368,13 @@ public:
   {
     if (mem > 0) {
       unsigned __int64 requested = mem * 1048576ull;
-      cudaDeviceProp prop;
-      CUDA_CHECK(cudaGetDeviceProperties(&prop, device_index));
       unsigned __int64 mem_limit = prop.totalGlobalMem;
       memory_max = clamp(requested, 64 * 1024 * 1024ull, mem_limit - 128 * 1024 * 1024ull);
     }
     return (int)(memory_max / 1048576ull);
   }
 
-  virtual BYTE* Allocate(size_t size)
+  virtual BYTE* Allocate(size_t size, int margin)
   {
     BYTE* data = nullptr;
     ScopedCUDADevice d(device_index, env);
@@ -425,6 +440,12 @@ public:
       free_thresh = val;
     }
   }
+
+	virtual void GetAlignmentRequirement(int* memoryAlignment, int* pitchAlignment)
+	{
+		*memoryAlignment = prop.textureAlignment;
+		*pitchAlignment = prop.texturePitchAlignment;
+	}
 };
 #endif
 
@@ -443,8 +464,6 @@ DeviceManager::DeviceManager(InternalEnvironment* env) :
   }
   // do not modify CUDADevices after this since it causes pointer change
 
-  // if cuda capable device is available, we always allocate with page locked memory.
-  // is it OK ???
   cpuDevice = std::unique_ptr<Device>((cuda_device_count > 0)
     ? new CUDACPUDevice(env, cuda_device_count)
     : new CPUDevice(env));
@@ -479,6 +498,24 @@ Device* DeviceManager::GetDevice(AvsDeviceType device_type, int device_index) co
     env->ThrowError("Not supported memory type %d", device_type);
   }
   return nullptr;
+}
+
+int DeviceManager::GetNumDevices(AvsDeviceType device_type) const
+{
+	switch (device_type) {
+
+	case DEV_TYPE_CPU:
+		return 1;
+
+#ifdef ENABLE_CUDA
+	case DEV_TYPE_CUDA:
+		return (int)cudaDevices.size();
+#endif // #ifdef ENABLE_CUDA
+
+	default:
+		env->ThrowError("Not supported memory type %d", device_type);
+	}
+	return 0;
 }
 
 void DeviceManager::SetDeviceOpt(DeviceOpt opt, int val, InternalEnvironment* env)
