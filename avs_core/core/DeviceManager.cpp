@@ -12,7 +12,7 @@
 #include "AVSMap.h"
 #include "parser/scriptparser.h"
 
-#define ENABLE_CUDA_COMPUTE_STREAM 1
+#define ENABLE_CUDA_COMPUTE_STREAM 0
 
 #ifdef ENABLE_CUDA
 
@@ -427,7 +427,7 @@ public:
 #endif
   }
 
-  void BeginTransfer(cudaStream_t stream, InternalEnvironment* env)
+  void MakeStreamWaitCompute(cudaStream_t stream, InternalEnvironment* env)
   {
 #if ENABLE_CUDA_COMPUTE_STREAM
 		std::lock_guard<std::mutex> lock(mutex);
@@ -436,13 +436,6 @@ public:
     CUDA_CHECK(cudaStreamWaitEvent(stream, computeEvent, 0));
 #endif
   }
-
-	void EndTransfer(cudaEvent_t transferEvent, InternalEnvironment* env)
-	{
-#if ENABLE_CUDA_COMPUTE_STREAM
-      CUDA_CHECK(cudaStreamWaitEvent(computeStream, transferEvent, 0));
-#endif
-	}
 
   void SetDeviceOpt(DeviceOpt opt, int val, InternalEnvironment* env) {
     if (opt == DEV_FREE_THRESHOLD) {
@@ -782,8 +775,6 @@ class CUDAFrameTransferEngine : public FrameTransferEngine
   cudaStream_t stream;
   std::deque<QueueItem> prefetchQueue;
 
-  CUDADevice* cudaDevice; // downstream or upstream
-
   cudaMemcpyKind GetMemcpyKind()
   {
     if (upstreamDevice->device_type == DEV_TYPE_CPU && downstreamDevice->device_type == DEV_TYPE_CUDA) {
@@ -857,7 +848,7 @@ class CUDAFrameTransferEngine : public FrameTransferEngine
     item.completeCallbacks = upstreamDevice->GetAndClearCallbacks();
 
     if (upstreamDevice->device_type == DEV_TYPE_CUDA) {
-      static_cast<CUDADevice*>(upstreamDevice)->BeginTransfer(stream, env);
+      static_cast<CUDADevice*>(upstreamDevice)->MakeStreamWaitCompute(stream, env);
     }
 
     TransferFrameData(cacheHandle.first->value, item.src, true, env);
@@ -926,9 +917,6 @@ class CUDAFrameTransferEngine : public FrameTransferEngine
         CUDA_CHECK(err);
 
         // transfer is complete
-        if (downstreamDevice->device_type == DEV_TYPE_CUDA) {
-          static_cast<CUDADevice*>(downstreamDevice)->EndTransfer(item.completeEvent, env);
-        }
         CUDA_CHECK(cudaEventDestroy(item.completeEvent));
         ExecuteCallbacks(item.completeCallbacks.get());
 
@@ -948,9 +936,6 @@ class CUDAFrameTransferEngine : public FrameTransferEngine
       QueueItem& item = prefetchQueue.front();
       try {
         CUDA_CHECK(cudaEventSynchronize(item.completeEvent));
-        if (downstreamDevice->device_type == DEV_TYPE_CUDA) {
-          static_cast<CUDADevice*>(downstreamDevice)->EndTransfer(item.completeEvent, env);
-        }
         CUDA_CHECK(cudaEventDestroy(item.completeEvent));
         ExecuteCallbacks(item.completeCallbacks.get());
 
@@ -1001,11 +986,8 @@ public:
   {
     CheckDevicePair(env);
 
-    cudaDevice = static_cast<CUDADevice*>(
-      (upstreamDevice->device_type == DEV_TYPE_CUDA) ? upstreamDevice : downstreamDevice);
-
-    // note: stream belongs to cuda device
-    cudaDevice->SetActiveToCurrentThread(env);
+    // note: stream belongs to a device
+    upstreamDevice->SetActiveToCurrentThread(env);
     CUDA_CHECK(cudaStreamCreate(&stream));
   }
 
@@ -1027,8 +1009,8 @@ public:
     // Giant lock. This is OK because all transfer is done asynchronously
     std::lock_guard<std::mutex> lock(mutex);
 
-    // set cuda device
-    cudaDevice->SetActiveToCurrentThread(env);
+    // set upstream device
+    upstreamDevice->SetActiveToCurrentThread(env);
 
     // do not use thread when invoke running
     if (prefetchFrames == 0 || env->GetSuppressThreadCount() > 0) {
